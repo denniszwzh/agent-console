@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,7 @@ import type { AgentAdapter, AgentEvent, RunRequest } from '../../src/agents/adap
 import { buildApp } from '../../src/server/app.js';
 import { EventBus } from '../../src/server/events.js';
 import { UnitStore } from '../../src/server/store.js';
+import { questionPrompt } from '../../src/server/prompts.js';
 import { ConflictError, ThreadEngine } from '../../src/server/threads.js';
 import type { Anchor, ReviewUnit } from '../../src/shared/types.js';
 
@@ -376,5 +377,150 @@ describe('unit routes', () => {
     const created = await a.inject({ method: 'POST', url: '/api/units/unit-1/threads', headers, payload: { anchor, question: 'q' } });
     const del = await a.inject({ method: 'DELETE', url: `/api/threads/${created.json().id}`, headers });
     expect(del.statusCode).toBe(204);
+  });
+});
+
+describe('ThreadEngine fix round 1', () => {
+  it('reconciles threads left answering after a restart', () => {
+    const store = new UnitStore();
+    const { engine } = setup(() => answer('f'));
+    const t = engine.addDraft('unit-1', anchor, 'q');
+    const u = store.get('unit-1')!;
+    u.threads[0].status = 'answering';
+    store.save(u);
+    const reloaded = new ThreadEngine(store, new EventBus(), {}, 3);
+    expect(reloaded.getThread(t.id)).toMatchObject({ status: 'error', error: 'Interrupted by server restart' });
+    expect(() => reloaded.retry(t.id)).not.toThrow();
+  });
+
+  it('an in-flight run does not resurrect an expired thread or touch a non-open unit', async () => {
+    const gate = deferred();
+    const { engine, store } = setup(async () => {
+      await gate.promise;
+      return answer('fork-1', 'late answer');
+    });
+    const t = engine.addDraft('unit-1', anchor, 'q');
+    engine.sendDrafts('unit-1');
+    await new Promise((r) => setTimeout(r, 10));
+    const u = store.get('unit-1')!;
+    u.status = 'stale';
+    u.threads[0].status = 'expired';
+    store.save(u);
+    gate.resolve();
+    await engine.whenIdle();
+    const saved = store.get('unit-1')!.threads.find((x) => x.id === t.id)!;
+    expect(saved.status).toBe('expired');
+    expect(saved.sessionId).toBe('fork-1');
+    expect(saved.messages[1].content).toBe('late answer');
+  });
+
+  it('a failing store during fail() does not cause an unhandled rejection', async () => {
+    let broken = false;
+    class FlakyStore extends UnitStore {
+      save(u: ReviewUnit): void {
+        if (broken) throw new Error('EPERM');
+        super.save(u);
+      }
+    }
+    const store = new FlakyStore();
+    makeUnit(store);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const engine = new ThreadEngine(
+      store,
+      new EventBus(),
+      {
+        claude: new FakeAdapter(() => {
+          broken = true;
+          throw new Error('spawn failed');
+        }),
+      },
+      3,
+      { gitStatus: async () => null },
+    );
+    engine.addDraft('unit-1', anchor, 'q');
+    engine.sendDrafts('unit-1');
+    await engine.whenIdle();
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('question prompt keeps the line range for file anchors without headings and msg anchors', () => {
+    const a = { ...anchor, startLine: 3, endLine: 5 };
+    expect(questionPrompt(a, 'file src/a.ts', 'q')).toContain('file src/a.ts lines 3\u20135');
+    expect(questionPrompt({ ...a, headingPath: ['A', 'B'] }, 'file x.md', 'q')).toContain('file x.md \u00a7 A > B lines 3\u20135');
+    expect(questionPrompt(a, 'earlier answer in this review thread', 'q')).toContain(
+      'earlier answer in this review thread lines 3\u20135',
+    );
+    expect(questionPrompt(a, 'agent reply', 'q')).toContain('Source: agent reply');
+  });
+
+  it('retry after a failed resolve re-runs the conclusion', async () => {
+    const { engine, adapter } = setup((_r, n) => {
+      if (n === 1) return answer('fork-1');
+      if (n === 2) return [{ type: 'error', message: 'conclusion failed' }];
+      return [{ type: 'done', finalText: 'Keep as is.' }];
+    });
+    const t = engine.addDraft('unit-1', anchor, 'q');
+    engine.sendDrafts('unit-1');
+    await engine.whenIdle();
+    await engine.resolve(t.id);
+    expect(engine.getThread(t.id).status).toBe('error');
+    engine.retry(t.id);
+    await engine.whenIdle();
+    expect(adapter.requests[2]).toMatchObject({ parentSessionId: 'fork-1', fork: false });
+    expect(adapter.requests[2].prompt).toContain('ONE line');
+    expect(engine.getThread(t.id)).toMatchObject({ status: 'resolved', conclusion: 'Keep as is.' });
+  });
+
+  it('retry after a failed follow-up resends the follow-up text', async () => {
+    const { engine, adapter } = setup((_r, n) => {
+      if (n === 1) return answer('fork-1');
+      if (n === 2) return [{ type: 'error', message: 'nope' }];
+      return answer('fork-1', 'ok');
+    });
+    const t = engine.addDraft('unit-1', anchor, 'q');
+    engine.sendDrafts('unit-1');
+    await engine.whenIdle();
+    engine.followUp(t.id, 'again?');
+    await engine.whenIdle();
+    engine.retry(t.id);
+    await engine.whenIdle();
+    expect(adapter.requests[2]).toMatchObject({ parentSessionId: 'fork-1', fork: false, prompt: 'again?' });
+  });
+
+  it('retry after an answer that failed after partial text resends the question', async () => {
+    const { engine, adapter } = setup((_r, n) =>
+      n === 1 ? [{ type: 'session', sessionId: 'f1' }, { type: 'text', text: 'part' }, { type: 'error', message: 'x' }] : answer('f1'),
+    );
+    const t = engine.addDraft('unit-1', anchor, 'the question');
+    engine.sendDrafts('unit-1');
+    await engine.whenIdle();
+    engine.retry(t.id);
+    await engine.whenIdle();
+    expect(adapter.requests[1].prompt).toContain('the question');
+    expect(engine.getThread(t.id).status).toBe('awaiting');
+  });
+
+  it('clamps concurrency to an integer >= 1', async () => {
+    for (const [c, expected] of [[0, 1], ['abc', 3]] as const) {
+      const gate = deferred();
+      const store = new UnitStore();
+      makeUnit(store);
+      const adapter = new FakeAdapter(async (_r, n) => {
+        await gate.promise;
+        return answer(`f${n}`);
+      });
+      const engine = new ThreadEngine(store, new EventBus(), { claude: adapter }, c as unknown as number, {
+        gitStatus: async () => null,
+      });
+      for (let i = 0; i < 4; i++) engine.addDraft('unit-1', anchor, `q${i}`);
+      engine.sendDrafts('unit-1');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(adapter.running).toBe(expected);
+      gate.resolve();
+      await engine.whenIdle();
+      expect(adapter.requests).toHaveLength(4);
+      rmSync(join(home, 'units'), { recursive: true, force: true });
+    }
   });
 });

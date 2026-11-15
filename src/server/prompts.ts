@@ -9,10 +9,9 @@ export function questionPrompt(anchor: Anchor, sourceLabel: string, question: st
     .split(/\r?\n/)
     .map((l) => `> ${l}`)
     .join('\n');
-  const where =
-    sourceLabel.startsWith('file ') && anchor.headingPath.length
-      ? `${sourceLabel} § ${anchor.headingPath.join(' > ')} lines ${anchor.startLine}–${anchor.endLine}`
-      : sourceLabel;
+  const range = `lines ${anchor.startLine}–${anchor.endLine}`;
+  const heading = anchor.headingPath.length ? ` § ${anchor.headingPath.join(' > ')}` : '';
+  const where = sourceLabel === 'agent reply' ? sourceLabel : `${sourceLabel}${heading} ${range}`;
   return [
     'You are answering a read-only side-branch review question about work done in this session.',
     'Do NOT modify, create or delete any files, and do not run commands that change state. Only read and explain.',

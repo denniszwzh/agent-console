@@ -51,23 +51,36 @@ type Job = () => Promise<void>;
 export class ThreadEngine {
   private forkSessions = new Set<string>();
   private threadUnit = new Map<string, string>();
+  private concurrency: number;
   private active = 0;
   private waiting: (() => void)[] = [];
   private inflight = new Set<Promise<void>>();
+  /** Threads whose last failure happened in an answer run (not the conclusion run). */
+  private answerFailed = new Set<string>();
 
   constructor(
     private store: UnitStore,
     private bus: EventBus,
     private adapters: Partial<Record<AgentKind, AgentAdapter>>,
-    private concurrency: number,
+    concurrency: number,
     private opts: ThreadEngineOptions = {},
   ) {
+    this.concurrency =
+      typeof concurrency === 'number' && Number.isFinite(concurrency) ? Math.max(1, Math.floor(concurrency)) : 3;
     for (const s of store.listSessions()) {
       for (const u of store.listBySession(s.sessionId)) {
+        let dirty = false;
         for (const t of u.threads) {
           this.threadUnit.set(t.id, u.id);
           if (t.sessionId) this.forkSessions.add(t.sessionId);
+          // Runs do not survive a restart; unstick threads that were mid-run.
+          if (u.status === 'open' && t.status === 'answering') {
+            t.status = 'error';
+            t.error = 'Interrupted by server restart';
+            dirty = true;
+          }
         }
+        if (dirty) this.persist(u);
       }
     }
   }
@@ -158,6 +171,13 @@ export class ThreadEngine {
     const { unit, thread } = this.locate(threadId);
     this.assertOpen(unit);
     if (thread.status !== 'error') throw new ConflictError('only threads in error can be retried');
+    const lastMsg = thread.messages[thread.messages.length - 1];
+    if (lastMsg?.role === 'assistant' && thread.sessionId && !this.answerFailed.has(threadId)) {
+      // The failure happened in the conclusion run: re-run it.
+      this.startConclusion(unit, thread);
+      return;
+    }
+    this.answerFailed.delete(threadId);
     const users = thread.messages.filter((m) => m.role === 'user');
     const last = users[users.length - 1];
     if (!last) throw new ConflictError('thread has no user message');
@@ -184,13 +204,17 @@ export class ThreadEngine {
   async resolve(threadId: string): Promise<void> {
     this.checkResolvable(threadId);
     const { unit, thread } = this.locate(threadId);
+    await this.startConclusion(unit, thread);
+  }
+
+  private startConclusion(unit: ReviewUnit, thread: Thread): Promise<void> {
     const childConclusions = unit.threads
-      .filter((t) => t.parentThreadId === threadId && t.conclusion)
+      .filter((t) => t.parentThreadId === thread.id && t.conclusion)
       .map((t) => t.conclusion as string);
     thread.status = 'answering';
     delete thread.error;
     this.persist(unit);
-    await this.enqueue(threadId, () => this.runConclusion(threadId, conclusionPrompt(childConclusions)));
+    return this.enqueue(thread.id, () => this.runConclusion(thread.id, conclusionPrompt(childConclusions)));
   }
 
   setConclusion(threadId: string, conclusion: string | null): void {
@@ -262,6 +286,7 @@ export class ThreadEngine {
   private enqueue(threadId: string, job: Job): Promise<void> {
     const p: Promise<void> = this.withSlot(job)
       .catch((e) => this.fail(threadId, (e as Error).message))
+      .catch((e) => console.error(`[threads] run bookkeeping failed for ${threadId}: ${(e as Error).message}`))
       .finally(() => this.inflight.delete(p));
     this.inflight.add(p);
     return p;
@@ -279,8 +304,16 @@ export class ThreadEngine {
     }
   }
 
+  /** Status-changing mutation; skipped for expired threads and non-open units. */
+  private mutateStatus(threadId: string, fn: (t: Thread) => void): void {
+    this.mutate(threadId, (t, u) => {
+      if (t.status === 'expired' || u.status !== 'open') return;
+      fn(t);
+    });
+  }
+
   private fail(threadId: string, message: string): void {
-    this.mutate(threadId, (t) => {
+    this.mutateStatus(threadId, (t) => {
       t.status = 'error';
       t.error = message;
     });
@@ -335,6 +368,7 @@ export class ThreadEngine {
         m.blocks = splitBlocks(content, 'markdown');
       });
     };
+    this.answerFailed.delete(threadId);
     await this.runAgent(threadId, prompt, fork, (ev) => {
       if (finished) return;
       if (ev.type === 'session') {
@@ -348,15 +382,17 @@ export class ThreadEngine {
       } else if (ev.type === 'done') {
         finished = true;
         setContent(ev.finalText);
-        this.mutate(threadId, (t) => {
+        this.mutateStatus(threadId, (t) => {
           t.status = 'awaiting';
         });
       } else if (ev.type === 'error') {
         finished = true;
+        this.answerFailed.add(threadId);
         this.fail(threadId, ev.message);
       }
     });
     if (!finished && this.getThread(threadId).status === 'answering') {
+      this.answerFailed.add(threadId);
       this.fail(threadId, 'Agent ended without a final answer');
     }
   }
@@ -370,7 +406,7 @@ export class ThreadEngine {
       } else if (ev.type === 'done') {
         finished = true;
         const first = ev.finalText.trim().split(/\r?\n/)[0] ?? '';
-        this.mutate(threadId, (t) => {
+        this.mutateStatus(threadId, (t) => {
           t.conclusion = first;
           t.noConclusion = false;
           t.status = 'resolved';
