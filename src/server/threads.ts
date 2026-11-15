@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { AgentAdapter, AgentEvent } from '../agents/adapter.js';
 import { splitBlocks } from '../shared/blocks.js';
 import { canSubmit as canSubmitUnit } from '../shared/gate.js';
@@ -14,17 +16,19 @@ export class ValidationError extends Error {}
 
 export interface ThreadEngineOptions {
   gitStatus?: (cwd: string) => Promise<string | null>;
+  /** Stat seam for change fingerprints; returns null when the file is missing. */
+  statPath?: (absPath: string) => { mtimeMs: number; size: number } | null;
 }
 
 function defaultGitStatus(cwd: string): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile('git', ['status', '--porcelain'], { cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+    execFile('git', ['status', '--porcelain', '--untracked-files=all'], { cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
       resolve(err ? null : stdout);
     });
   });
 }
 
-/** Parse `git status --porcelain` output into a map of line -> path. */
+/** Maps each path listed by `git status --porcelain` to its status code (rename targets use the new path). */
 function parsePorcelain(out: string): Map<string, string> {
   const map = new Map<string, string>();
   for (const line of out.split(/\r?\n/)) {
@@ -33,17 +37,40 @@ function parsePorcelain(out: string): Map<string, string> {
     const arrow = p.indexOf(' -> ');
     if (arrow >= 0) p = p.slice(arrow + 4);
     if (p.length >= 2 && p.startsWith('"') && p.endsWith('"')) p = p.slice(1, -1);
-    map.set(line, p);
+    map.set(p, line.slice(0, 2));
   }
   return map;
 }
 
-function changedPaths(before: string, after: string): string[] {
-  const b = parsePorcelain(before);
-  const a = parsePorcelain(after);
+function defaultStat(absPath: string): { mtimeMs: number; size: number } | null {
+  try {
+    const st = fs.statSync(absPath);
+    return { mtimeMs: st.mtimeMs, size: st.size };
+  } catch {
+    return null;
+  }
+}
+
+/** path -> status code + mtime + size, so re-edits of an already-dirty file change the fingerprint. */
+type Fingerprints = Map<string, string>;
+
+function fingerprint(
+  out: string,
+  cwd: string,
+  stat: (absPath: string) => { mtimeMs: number; size: number } | null,
+): Fingerprints {
+  const result: Fingerprints = new Map();
+  for (const [p, code] of parsePorcelain(out)) {
+    const st = stat(path.resolve(cwd, p));
+    result.set(p, st ? `${code}|${st.mtimeMs}|${st.size}` : `${code}|deleted`);
+  }
+  return result;
+}
+
+function changedPaths(before: Fingerprints, after: Fingerprints): string[] {
   const paths = new Set<string>();
-  for (const [line, p] of a) if (!b.has(line)) paths.add(p);
-  for (const [line, p] of b) if (!a.has(line)) paths.add(p);
+  for (const [p, f] of after) if (before.get(p) !== f) paths.add(p);
+  for (const p of before.keys()) if (!after.has(p)) paths.add(p);
   return [...paths].sort();
 }
 
@@ -328,11 +355,11 @@ export class ThreadEngine {
       return;
     }
     const parentSessionId = fork ? thread.forkFromSessionId : (thread.sessionId as string);
-    const before = await this.safeGit(unit.cwd);
+    const before = await this.snapshot(unit.cwd);
     try {
       for await (const ev of adapter.run({ parentSessionId, fork, prompt, cwd: unit.cwd })) onEvent(ev);
     } finally {
-      const after = await this.safeGit(unit.cwd);
+      const after = await this.snapshot(unit.cwd);
       if (before !== null && after !== null) {
         const paths = changedPaths(before, after);
         if (paths.length) {
@@ -344,9 +371,10 @@ export class ThreadEngine {
     }
   }
 
-  private async safeGit(cwd: string): Promise<string | null> {
+  private async snapshot(cwd: string): Promise<Fingerprints | null> {
     try {
-      return await (this.opts.gitStatus ?? defaultGitStatus)(cwd);
+      const out = await (this.opts.gitStatus ?? defaultGitStatus)(cwd);
+      return out === null ? null : fingerprint(out, cwd, this.opts.statPath ?? defaultStat);
     } catch {
       return null;
     }

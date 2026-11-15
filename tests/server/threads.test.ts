@@ -70,11 +70,16 @@ const answer = (sid: string, text = 'An answer'): AgentEvent[] => [
   { type: 'done', finalText: text },
 ];
 
-function setup(script: Script, concurrency = 3, gitStatus: (cwd: string) => Promise<string | null> = async () => null) {
+function setup(
+  script: Script,
+  concurrency = 3,
+  gitStatus: (cwd: string) => Promise<string | null> = async () => null,
+  statPath?: (abs: string) => { mtimeMs: number; size: number } | null,
+) {
   const store = new UnitStore();
   const bus = new EventBus();
   const adapter = new FakeAdapter(script);
-  const engine = new ThreadEngine(store, bus, { claude: adapter }, concurrency, { gitStatus });
+  const engine = new ThreadEngine(store, bus, { claude: adapter }, concurrency, { gitStatus, statPath });
   makeUnit(store);
   return { store, bus, adapter, engine };
 }
@@ -315,6 +320,36 @@ describe('ThreadEngine', () => {
     expect(w).toHaveLength(1);
     expect(w[0].threadId).toBe(t.id);
     expect(w[0].paths).toEqual(['docs/spec.md', 'new.md']);
+  });
+
+  it('warns when an already-listed (untracked or modified) file changes content during a run', async () => {
+    const stats: Record<string, { mtimeMs: number; size: number }> = { 'docs/a.md': { mtimeMs: 1, size: 10 } };
+    const { engine, store } = setup(
+      () => {
+        stats['docs/a.md'] = { mtimeMs: 2, size: 12 }; // edited while the fork runs
+        return answer('f');
+      },
+      3,
+      async () => '?? docs/a.md\n M src/b.ts\n',
+      (abs) => stats[abs.split(/[\\/]/).slice(-2).join('/')] ?? { mtimeMs: 5, size: 5 },
+    );
+    engine.addDraft('unit-1', anchor, 'q');
+    engine.sendDrafts('unit-1');
+    await engine.whenIdle();
+    expect(store.get('unit-1')!.warnings.map((w) => w.paths)).toEqual([['docs/a.md']]);
+  });
+
+  it('no warning when listed files are unchanged', async () => {
+    const { engine, store } = setup(
+      () => answer('f'),
+      3,
+      async () => '?? docs/a.md\n M src/b.ts\n',
+      () => ({ mtimeMs: 1, size: 1 }),
+    );
+    engine.addDraft('unit-1', anchor, 'q');
+    engine.sendDrafts('unit-1');
+    await engine.whenIdle();
+    expect(store.get('unit-1')!.warnings).toEqual([]);
   });
 
   it('non-git cwd skips the check', async () => {

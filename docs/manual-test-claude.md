@@ -70,9 +70,7 @@ Observed:
    `{threadId, paths:["docs/test-spec.md"]}` (status went from clean to ` M docs/test-spec.md`).
 
 Result: PASS for the guard and for the warning on tracked files.
-LIMITATION (product concern): the post-check cannot detect edits to files inside an UNTRACKED directory, or further edits to an
-already-modified/untracked file, because `git status --porcelain` collapses untracked directories and shows only the status code, not content.
-Possible mitigations: `--untracked-files=all` and/or hashing `git diff` and file contents. This is a detection gap only; forks still cannot write.
+LIMITATION found here, since FIXED (fix round 1): the post-check used plain `git status --porcelain`, which collapses untracked directories and shows only status codes. It now uses `--untracked-files=all` and fingerprints each listed path (status + mtime + size), so edits inside untracked dirs and re-edits of already-modified files warn. Covered by unit tests; not re-run against the real CLI.
 
 ## Step 6: resolve, submit, deliver, stale
 
@@ -87,9 +85,9 @@ Observed:
   `docs/test-spec.md` (80% to 90%, as the second conclusion requested), and `delivered` became `true`.
 - The Stop hook created a new `open` unit for the new turn. The submitted unit stayed `submitted` (delivered); it did NOT become `stale`.
   The stale transition applies to units still `open`: after one more main turn, the previous open unit became `stale` and the
-  newest was `open`. This matches the hook code (units whose status is not `open` are skipped) but differs from the brief's wording ("old round becomes stale").
+  newest was `open`. This is the intended behaviour (controller ruling): a submitted unit is already closed to writes, and only open units go stale.
 
-Result: PASS (bundle delivered and applied). Controller to confirm whether a submitted and delivered unit staying `submitted` is intended.
+Result: PASS (bundle delivered and applied)
 
 ## Step 7: server stopped
 
