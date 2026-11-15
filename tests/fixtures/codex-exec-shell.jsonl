@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a1dd98-547e-7391-b3be-7de00dac8d89"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"\"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe\" -Command 'git status --short'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"\"C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe\" -Command 'git status --short'","aggregated_output":"warning: unable to access 'C:\\Users\\user/.config/git/ignore': Permission denied\nwarning: unable to access 'C:\\Users\\user/.config/git/ignore': Permission denied\n?? exec.err\n?? exec.jsonl\n?? fork.err\n?? fork.jsonl\n?? hooks1.err\n?? hooks1.jsonl\n?? shell.err\n?? shell.jsonl\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"done"}}
+{"type":"turn.completed","usage":{"input_tokens":36159,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":107,"reasoning_output_tokens":0}}
