@@ -3,6 +3,7 @@ import type { ReviewUnit } from '../shared/types.js';
 import { ApiError, api, subscribeEvents, type SessionSummary } from './api.js';
 import { Sidebar } from './components/Sidebar.js';
 import { UnitView } from './components/UnitView.js';
+import { useSidebarLayout } from './layout.js';
 import type { UnitActions } from './unit-context.js';
 
 interface Selection {
@@ -20,6 +21,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [unauthorized, setUnauthorized] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const layout = useSidebarLayout();
   // Request counters so a slow, older response never overwrites a newer one.
   const seq = useRef(new Map<string, number>());
 
@@ -136,15 +138,30 @@ export function App() {
     );
   }
 
+  const navToggle = layout.open ? null : (
+    <button type="button" className="btn ghost nav-toggle" aria-label="顯示側欄" title="顯示側欄" onClick={layout.show}>
+      ☰
+    </button>
+  );
+
   return (
-    <div className="app">
-      <Sidebar
-        sessions={sessions}
-        unitsBySession={units}
-        selectedSession={sel.session}
-        selectedUnit={sel.unit}
-        onSelect={(session, unit) => setSel({ session, unit })}
-      />
+    <div className={`app ${layout.compact ? 'layout-compact' : 'layout-wide'}${layout.open ? ' sidebar-open' : ''}`}>
+      {layout.open && (
+        <Sidebar
+          sessions={sessions}
+          unitsBySession={units}
+          selectedSession={sel.session}
+          selectedUnit={sel.unit}
+          drawer={layout.compact}
+          onHide={layout.hide}
+          onSelect={(session, unit) => {
+            setSel({ session, unit });
+            // In the drawer, picking a reply returns the full screen to the content.
+            if (layout.compact && unit) layout.hide();
+          }}
+        />
+      )}
+      {layout.compact && layout.open && <div className="drawer-backdrop" aria-hidden="true" onClick={layout.hide} />}
       <div className="main">
         {error && (
           <div className="toast" role="alert">
@@ -155,9 +172,12 @@ export function App() {
           </div>
         )}
         {shown && actions ? (
-          <UnitView key={shown.id} unit={shown} actions={actions} />
+          <UnitView key={shown.id} unit={shown} actions={actions} navToggle={navToggle} />
         ) : (
-          <div className="placeholder">{loaded ? '選擇左側的一則回覆開始審查。' : '載入中…'}</div>
+          <>
+            {navToggle && <div className="tabs">{navToggle}</div>}
+            <div className="placeholder">{loaded ? '選擇側欄中的一則回覆開始審查。' : '載入中…'}</div>
+          </>
         )}
       </div>
     </div>

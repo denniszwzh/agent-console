@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import type { Source } from '../../shared/types.js';
 import { basename } from '../labels.js';
 import { isOpenThread, rootSourceId, useUnit } from '../unit-context.js';
@@ -8,9 +8,11 @@ interface Props {
   onSelect(sourceId: string): void;
   /** Called just before a file is added, so the view can switch to it once it arrives. */
   onAddingFile(): void;
+  /** Rendered before the tabs (the "show sidebar" button when the sidebar is hidden). */
+  leading?: ReactNode;
 }
 
-export function SourceTabs({ activeId, onSelect, onAddingFile }: Props) {
+export function SourceTabs({ activeId, onSelect, onAddingFile, leading }: Props) {
   const { unit, readOnly, actions } = useUnit();
   const [adding, setAdding] = useState(false);
   const [path, setPath] = useState('');
@@ -38,6 +40,7 @@ export function SourceTabs({ activeId, onSelect, onAddingFile }: Props) {
 
   return (
     <nav className="tabs">
+      {leading}
       <div role="tablist" aria-label="審查內容" className="tab-list">
         {sources.map((s) => {
           const n = openCount(s.id);

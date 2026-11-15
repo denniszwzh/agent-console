@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ReviewUnit } from '../../shared/types.js';
 import { UNIT_STATUS_LABELS, formatTime } from '../labels.js';
 import { UnitProvider, useUnit, type UnitActions } from '../unit-context.js';
@@ -29,7 +29,7 @@ function Banners() {
   );
 }
 
-function UnitBody() {
+function UnitBody({ navToggle }: { navToggle?: ReactNode }) {
   const { unit } = useUnit();
   const [activeId, setActiveId] = useState(unit.reply.id);
   const awaitingNewFile = useRef<number | null>(null);
@@ -56,6 +56,7 @@ function UnitBody() {
       <Banners />
       <SourceTabs
         activeId={active.id}
+        leading={navToggle}
         onSelect={setActiveId}
         onAddingFile={() => {
           awaitingNewFile.current = unit.files.length;
@@ -69,10 +70,10 @@ function UnitBody() {
   );
 }
 
-export function UnitView({ unit, actions }: { unit: ReviewUnit; actions: UnitActions }) {
+export function UnitView({ unit, actions, navToggle }: { unit: ReviewUnit; actions: UnitActions; navToggle?: ReactNode }) {
   return (
     <UnitProvider unit={unit} actions={actions}>
-      <UnitBody />
+      <UnitBody navToggle={navToggle} />
     </UnitProvider>
   );
 }

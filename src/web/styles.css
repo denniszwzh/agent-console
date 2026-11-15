@@ -154,10 +154,36 @@ textarea {
 
 /* ---- Layout ------------------------------------------------------------- */
 
+/*
+ * Wide layout: docked sidebar (hideable) + content filling the rest.
+ * Compact layout (portrait / narrow): content takes the whole screen; the sidebar is an overlay drawer.
+ */
 .app {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   height: 100%;
+}
+.app.layout-wide.sidebar-open {
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+.sidebar-drawer {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 40;
+  width: min(320px, 85vw);
+  box-shadow: 4px 0 24px rgb(0 0 0 / 0.2);
+}
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgb(0 0 0 / 0.3);
+}
+.nav-toggle {
+  flex: none;
+  align-self: center;
+  padding: 0.15rem 0.5rem;
+  font-size: 1rem;
 }
 
 .main {
@@ -188,7 +214,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.5rem 2rem;
+  padding: 0.5rem 1.25rem;
   background: var(--danger-soft);
   color: var(--danger);
   border-bottom: 1px solid var(--danger);
@@ -203,7 +229,11 @@ textarea {
   padding: 0.75rem 0.5rem 2rem;
 }
 .sidebar-title {
-  padding: 0.25rem 0.75rem 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0.25rem 0.75rem 0.75rem;
   font-weight: 650;
   letter-spacing: 0.02em;
   color: var(--text-soft);
@@ -310,7 +340,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem 2rem 0.5rem;
+  padding: 0.75rem 1.25rem 0.5rem;
   font-size: 0.8rem;
   color: var(--muted);
 }
@@ -348,7 +378,7 @@ textarea {
 }
 
 .banner {
-  margin: 0.25rem 2rem 0.5rem;
+  margin: 0.25rem 1.25rem 0.5rem;
   padding: 0.6rem 1rem;
   border-radius: var(--radius);
   font-size: 0.9rem;
@@ -384,7 +414,7 @@ textarea {
   display: flex;
   align-items: flex-end;
   gap: 0.5rem;
-  padding: 0 2rem;
+  padding: 0 1.25rem;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
@@ -445,19 +475,15 @@ textarea {
 
 .reading {
   flex: 1;
-  padding: 1.75rem 2rem 4rem;
+  padding: 1rem 1.25rem 3rem;
 }
+/* The source fills the available width; the right padding leaves room for the ask buttons. */
 .source {
-  max-width: 72ch;
-  margin: 0 auto;
-  padding: 2rem 2.5rem;
+  padding: 1.75rem 3rem 1.75rem 2rem;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--shadow);
-}
-.source-code {
-  max-width: 110ch;
 }
 .source-path {
   margin: -0.75rem 0 1.25rem;
@@ -966,7 +992,7 @@ textarea {
   position: sticky;
   bottom: 0;
   z-index: 10;
-  padding: 0.55rem 2rem;
+  padding: 0.55rem 1.25rem;
   background: var(--surface);
   border-top: 1px solid var(--border);
   box-shadow: 0 -4px 16px rgb(0 0 0 / 0.05);
@@ -1036,17 +1062,26 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 900px) {
-  .app {
-    grid-template-columns: 220px minmax(0, 1fr);
-  }
-  .reading {
-    padding: 1rem 0.75rem 3rem;
-  }
-  .source {
-    padding: 1.25rem 2.5rem 1.25rem 1.25rem;
-  }
-  .ask-btn {
-    right: -2.2rem;
-  }
+/* Compact layout: trim every gutter so the content uses the full screen width. */
+.layout-compact .unit-head {
+  padding: 0.5rem 0.75rem 0.25rem;
+}
+.layout-compact .tabs {
+  padding: 0 0.5rem;
+}
+.layout-compact .banner {
+  margin: 0.25rem 0.5rem 0.5rem;
+}
+.layout-compact .reading {
+  padding: 0.5rem 0.5rem 2rem;
+}
+.layout-compact .source {
+  padding: 1rem 2.6rem 1rem 1rem;
+  border-radius: 6px;
+}
+.layout-compact .ask-btn {
+  right: -2.2rem;
+}
+.layout-compact .conclusion-bar {
+  padding: 0.5rem 0.75rem;
 }

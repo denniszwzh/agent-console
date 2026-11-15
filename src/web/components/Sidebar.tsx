@@ -9,6 +9,10 @@ interface Props {
   selectedSession: string | null;
   selectedUnit: string | null;
   onSelect(sessionId: string, unitId: string | null): void;
+  /** Hides the sidebar (collapse when docked, close when shown as a drawer). */
+  onHide?(): void;
+  /** Rendered as an overlay drawer (portrait / narrow layout). */
+  drawer?: boolean;
 }
 
 function openThreadCount(units: ReviewUnit[] | undefined): number {
@@ -18,10 +22,17 @@ function openThreadCount(units: ReviewUnit[] | undefined): number {
     .reduce((n, u) => n + u.threads.filter(isOpenThread).length, 0);
 }
 
-export function Sidebar({ sessions, unitsBySession, selectedSession, selectedUnit, onSelect }: Props) {
+export function Sidebar({ sessions, unitsBySession, selectedSession, selectedUnit, onSelect, onHide, drawer }: Props) {
   return (
-    <aside className="sidebar">
-      <div className="sidebar-title">Agent Console</div>
+    <aside className={`sidebar${drawer ? ' sidebar-drawer' : ''}`}>
+      <div className="sidebar-title">
+        <span>Agent Console</span>
+        {onHide && (
+          <button type="button" className="btn ghost small sidebar-hide" aria-label="隱藏側欄" title="隱藏側欄" onClick={onHide}>
+            «
+          </button>
+        )}
+      </div>
       {sessions.length === 0 && (
         <p className="sidebar-empty">還沒有任何回覆。在 terminal 跟 agent 對話後，回覆會出現在這裡。</p>
       )}
