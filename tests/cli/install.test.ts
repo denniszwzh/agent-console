@@ -40,6 +40,18 @@ describe('applyChange (temp settings file only)', () => {
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(orig);
   });
 
+  it('refuses a non-object hooks value without writing', async () => {
+    fs.writeFileSync(file, JSON.stringify({ hooks: [] }));
+    await expect(applyChange(file, (s) => addHooks(s, cmds), async () => true, quiet)).rejects.toThrow(/not an object/);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ hooks: [] });
+    expect(fs.readdirSync(dir)).toEqual(['settings.json']);
+  });
+
+  it('leaves no temp file behind', async () => {
+    await applyChange(file, (s) => addHooks(s, cmds), async () => true, quiet);
+    expect(fs.readdirSync(dir)).toEqual(['settings.json']);
+  });
+
   it('treats a missing file as {}', async () => {
     await applyChange(file, (s) => addHooks(s, cmds), async () => true, quiet);
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual(addHooks({}, cmds));

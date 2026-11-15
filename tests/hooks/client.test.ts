@@ -1,6 +1,7 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
+import net from 'node:net';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { callServer } from '../../src/hooks/client.js';
@@ -28,6 +29,38 @@ describe('callServer', () => {
     expect(await callServer('POST', '/x', { a: 1 })).toBeNull();
     expect(Date.now() - t0).toBeLessThan(2500);
   });
+});
+
+describe('hang paths', () => {
+  it('callServer returns null when the server accepts but never responds', async () => {
+    const sockets: net.Socket[] = [];
+    const srv = net.createServer((s) => sockets.push(s));
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+    const port = (srv.address() as net.AddressInfo).port;
+    fs.writeFileSync(path.join(dir, 'token'), 'tok');
+    fs.writeFileSync(path.join(dir, 'server.json'), JSON.stringify({ port }));
+    const t0 = Date.now();
+    expect(await callServer('GET', '/x')).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(2500);
+    sockets.forEach((s) => s.destroy());
+    srv.close();
+  });
+
+  for (const script of ['claude-stop.js', 'claude-prompt.js']) {
+    it(`${script} exits 0 silently when stdin never closes`, async () => {
+      const t0 = Date.now();
+      const child = spawn('node', [path.resolve('dist/hooks', script)], {
+        env: { ...process.env, AGENT_CONSOLE_HOME: dir },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let out = '';
+      child.stdout.on('data', (d) => (out += d));
+      const code = await new Promise<number | null>((r) => child.on('close', r));
+      expect(code).toBe(0);
+      expect(out).toBe('');
+      expect(Date.now() - t0).toBeLessThan(4000);
+    }, 8000);
+  }
 });
 
 describe('hook scripts', () => {

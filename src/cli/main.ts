@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { addHooks, removeHooks } from './settings-merge.js';
+import { addHooks, assertRecognisable, removeHooks } from './settings-merge.js';
 import { start } from '../server/main.js';
 import { ensureToken, readConfig } from '../server/paths.js';
 
@@ -47,7 +47,7 @@ export async function applyChange(
   log: (s: string) => void = console.log,
 ): Promise<boolean> {
   const before = readSettings(settingsPath);
-  const after = transform(before);
+  const after = transform(before); // throws on an unsafe settings shape
   const b = JSON.stringify(hooksOf(before), null, 2);
   const a = JSON.stringify(hooksOf(after), null, 2);
   if (a === b) {
@@ -64,7 +64,9 @@ export async function applyChange(
   } else {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
   }
-  fs.writeFileSync(settingsPath, JSON.stringify(after, null, 2) + '\n');
+  const tmp = `${settingsPath}.agent-console-tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(after, null, 2) + '\n');
+  fs.renameSync(tmp, settingsPath);
   log('Done.');
   return true;
 }
@@ -77,17 +79,33 @@ export function hookCommands(): { Stop: string; UserPromptSubmit: string } {
   };
 }
 
+function openBrowser(url: string): void {
+  const [cmd, args]: [string, string[]] =
+    process.platform === 'win32'
+      ? ['cmd', ['/c', 'start', '', url]]
+      : process.platform === 'darwin'
+        ? ['open', [url]]
+        : ['xdg-open', [url]];
+  try {
+    execFile(cmd, args, () => {});
+  } catch {
+    // Opening the browser is best effort.
+  }
+}
+
 async function main(): Promise<void> {
   const sub = process.argv[2];
   const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
   if (sub === 'install') {
-    await applyChange(settingsPath, (s) => addHooks(s, hookCommands()));
+    const cmds = hookCommands();
+    assertRecognisable(cmds);
+    await applyChange(settingsPath, (s) => addHooks(s, cmds));
   } else if (sub === 'uninstall') {
     await applyChange(settingsPath, removeHooks);
   } else if (sub === undefined) {
     await start();
     const url = `http://127.0.0.1:${readConfig().port}/auth?token=${ensureToken()}`;
-    execFile('cmd', ['/c', 'start', '""', url], () => {});
+    openBrowser(url);
   } else {
     console.error(USAGE);
     process.exit(1);
@@ -97,7 +115,7 @@ async function main(): Promise<void> {
 // Run only when executed directly (npm bin shims are symlinks/wrappers, so compare real paths).
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   main().catch((e) => {
-    console.error(e);
+    console.error(e instanceof Error ? e.message : e);
     process.exit(1);
   });
 }

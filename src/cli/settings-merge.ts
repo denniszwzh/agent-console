@@ -35,6 +35,7 @@ function stripOurs(groups: Group[]): Group[] {
 }
 
 export function removeHooks(settings: object): object {
+  assertHooksShape(settings);
   const out = clone(settings) as Json;
   const hooks = out.hooks as Json | undefined;
   if (!hooks || typeof hooks !== 'object') return out;
@@ -46,11 +47,28 @@ export function removeHooks(settings: object): object {
     if (after.length > 0) hooks[event] = after;
     else delete hooks[event];
   }
-  if (Object.keys(hooks).length === 0) delete out.hooks;
   return out;
 }
 
+/** Throws when `hooks` exists but is not a plain object. */
+function assertHooksShape(settings: object): void {
+  const h = (settings as Json).hooks;
+  if (h !== undefined && (h === null || typeof h !== 'object' || Array.isArray(h))) {
+    throw new Error('settings.json "hooks" is not an object; refusing to modify it');
+  }
+}
+
+/** Throws unless every generated command is recognisable by removeHooks. */
+export function assertRecognisable(hookCmds: HookCmds): void {
+  for (const c of Object.values(hookCmds)) {
+    if (!isOurs(c)) {
+      throw new Error(`hook command is not recognisable as agent-console's (path must contain "agent-console"): ${c}`);
+    }
+  }
+}
+
 export function addHooks(settings: object, hookCmds: HookCmds): object {
+  assertHooksShape(settings);
   // Strip first so repeated calls (and stale paths) never duplicate our entries.
   const out = removeHooks(settings) as Json;
   const hooks = (out.hooks && typeof out.hooks === 'object' ? out.hooks : {}) as Json;

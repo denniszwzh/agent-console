@@ -31,3 +31,23 @@ export async function callServer(method: 'GET' | 'POST', urlPath: string, body?:
     clearTimeout(timer);
   }
 }
+
+/** Reads stdin, resolving with whatever arrived once it closes or after `ms` (default 1.5 s). */
+export function readStdin(ms = 1500): Promise<string> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    const done = () => {
+      clearTimeout(timer);
+      process.stdin.off('data', onData);
+      process.stdin.off('end', done);
+      process.stdin.off('error', done);
+      process.stdin.pause();
+      resolve(Buffer.concat(chunks).toString('utf8'));
+    };
+    const onData = (c: Buffer) => chunks.push(c);
+    const timer = setTimeout(done, ms);
+    process.stdin.on('data', onData);
+    process.stdin.on('end', done);
+    process.stdin.on('error', done);
+  });
+}

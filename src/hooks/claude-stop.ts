@@ -1,11 +1,5 @@
 import path from 'node:path';
-import { callServer } from './client.js';
-
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const c of process.stdin) chunks.push(c as Buffer);
-  return Buffer.concat(chunks).toString('utf8');
-}
+import { callServer, readStdin } from './client.js';
 
 async function main(): Promise<void> {
   if (process.env.AGENT_CONSOLE_FORK === '1') return;
@@ -19,5 +13,7 @@ async function main(): Promise<void> {
 
 // Run only when executed as the hook script, not when imported (tests).
 if (/^claude-stop\.(js|ts)$/.test(path.basename(process.argv[1] ?? ''))) {
+  // Hard budget: never hold up the Claude session.
+  setTimeout(() => process.exit(0), 3000).unref();
   main().finally(() => process.exit(0));
 }

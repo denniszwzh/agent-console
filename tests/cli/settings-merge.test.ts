@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addHooks, removeHooks } from '../../src/cli/settings-merge.js';
+import { addHooks, assertRecognisable, removeHooks } from '../../src/cli/settings-merge.js';
 
 const cmds = {
   Stop: 'node "C:\\x\\agent-console\\dist\\hooks\\claude-stop.js"',
@@ -40,7 +40,20 @@ describe('settings-merge', () => {
 
   it('removeHooks restores original', () => {
     expect(removeHooks(addHooks(fixture(), cmds))).toEqual(fixture());
-    expect(removeHooks(addHooks({}, cmds))).toEqual({});
+    expect(removeHooks(addHooks({ hooks: {} }, cmds))).toEqual({ hooks: {} });
+    expect(removeHooks(addHooks({}, cmds))).toEqual({ hooks: {} });
+  });
+
+  it('refuses a non-object hooks value', () => {
+    for (const bad of ['x', [], null]) {
+      expect(() => addHooks({ hooks: bad }, cmds)).toThrow(/not an object/);
+      expect(() => removeHooks({ hooks: bad })).toThrow(/not an object/);
+    }
+  });
+
+  it('assertRecognisable rejects paths without agent-console', () => {
+    expect(() => assertRecognisable(cmds)).not.toThrow();
+    expect(() => assertRecognisable({ ...cmds, Stop: 'node "C:\\other\\claude-stop.js"' })).toThrow(/not recognisable/);
   });
 
   it('does not mutate its input', () => {
