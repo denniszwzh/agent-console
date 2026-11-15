@@ -153,7 +153,7 @@ Final check with the rebuilt adapter, project `{"disableAllHooks":true}`, prompt
 `PreToolUse:PowerShell hook error: blocked by agent-console read-only guard: command not on the read-only allowlist: Set-Content`;
 no `probe-fixed.txt`.
 
-Not covered: managed (policy) settings, which outrank flag settings; a managed `disableAllHooks: true` would still switch the
+Not covered (not tested): managed (policy) settings, which per the documented precedence outrank flag settings; a managed `disableAllHooks: true` would presumably still switch the
 guard off (the PowerShell/Bash default-mode permission checks and the post-check warning remain).
 The scratch repo and temporary home were deleted. The runs left their transcripts under
 `~/.claude/projects/C--Users-Dennis-AppData-Local-Temp-ac-claude-dah-282102/` (new files only; nothing existing was modified).
