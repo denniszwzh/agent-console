@@ -6,8 +6,9 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { addCodexHooks, addHooks, assertRecognisable, HooksShapeError, removeHooks } from './settings-merge.js';
+import { callServer } from '../hooks/client.js';
 import { start } from '../server/main.js';
-import { ensureToken, readConfig } from '../server/paths.js';
+import { dataDir, ensureToken, readConfig, readServerInfo } from '../server/paths.js';
 
 const USAGE = `Usage: agent-console [install | uninstall]
 
@@ -154,6 +155,46 @@ function openBrowser(url: string): void {
   }
 }
 
+/** True when server.json points at a live Agent Console that accepts our token. */
+async function probeRunningConsole(): Promise<boolean> {
+  return Array.isArray(await callServer('GET', '/api/sessions'));
+}
+
+export interface LaunchDeps {
+  start: () => Promise<void>;
+  probe: () => Promise<boolean>;
+  openBrowser: (url: string) => void;
+  log: (s: string) => void;
+  error: (s: string) => void;
+}
+
+/**
+ * Starts the server and opens the browser. Returns null while the server keeps running, or an
+ * exit code when there is nothing more to do (a second launch while one already runs).
+ */
+export async function launch(deps: Partial<LaunchDeps> = {}): Promise<number | null> {
+  const d: LaunchDeps = { start, probe: probeRunningConsole, openBrowser, log: console.log, error: console.error, ...deps };
+  const port = readConfig().port;
+  try {
+    await d.start();
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw e;
+    const info = readServerInfo();
+    if (info && (await d.probe())) {
+      d.log(`Agent Console is already running on port ${info.port}; opening it.`);
+      d.openBrowser(`http://127.0.0.1:${info.port}/auth?token=${ensureToken()}`);
+      return 0;
+    }
+    d.error(
+      `Port ${port} is already in use by another program (EADDRINUSE). ` +
+        `Stop that program, or set a different "port" in ${path.join(dataDir(), 'config.json')}.`,
+    );
+    return 1;
+  }
+  d.openBrowser(`http://127.0.0.1:${port}/auth?token=${ensureToken()}`);
+  return null;
+}
+
 async function main(): Promise<void> {
   const sub = process.argv[2];
   if (sub === 'install') {
@@ -161,9 +202,8 @@ async function main(): Promise<void> {
   } else if (sub === 'uninstall') {
     await runUninstall(defaultTargets());
   } else if (sub === undefined) {
-    await start();
-    const url = `http://127.0.0.1:${readConfig().port}/auth?token=${ensureToken()}`;
-    openBrowser(url);
+    const code = await launch();
+    if (code !== null) process.exit(code);
   } else {
     console.error(USAGE);
     process.exit(1);
