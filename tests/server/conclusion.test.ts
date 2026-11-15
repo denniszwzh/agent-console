@@ -215,7 +215,7 @@ describe('prompt hook', () => {
     on.store.save(unit({ threads: [thread('a', { status: 'draft' }), thread('b', { status: 'awaiting' }), thread('c')] }));
     expect((await prompt(on.app)).json()).toEqual({
       action: 'block',
-      reason: 'Agent Console: 2 review thread(s) still open. Finish or delete them before continuing.',
+      reason: 'Agent Console: 2 review thread(s) still open. Finish them (or delete drafts) before continuing.',
     });
   });
 

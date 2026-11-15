@@ -115,7 +115,7 @@ export function registerHookRoutes(
       if (n > 0) {
         return {
           action: 'block',
-          reason: `Agent Console: ${n} review thread(s) still open. Finish or delete them before continuing.`,
+          reason: `Agent Console: ${n} review thread(s) still open. Finish them (or delete drafts) before continuing.`,
         };
       }
     }
