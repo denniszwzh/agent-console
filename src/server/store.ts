@@ -17,15 +17,33 @@ export class UnitStore {
     const final = path.join(dir, `${u.id}.json`);
     const tmp = path.join(dir, `.${u.id}.${crypto.randomUUID()}.tmp`);
     fs.writeFileSync(tmp, JSON.stringify(u));
-    fs.renameSync(tmp, final);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        fs.renameSync(tmp, final);
+        return;
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if ((code === 'EPERM' || code === 'EBUSY') && attempt < 5) {
+          // Windows may briefly lock the target (AV, OneDrive); back off and retry.
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20 * (attempt + 1));
+          continue;
+        }
+        try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+        throw e;
+      }
+    }
   }
 
   get(id: string): ReviewUnit | null {
+    let raw: string;
     try {
-      return JSON.parse(fs.readFileSync(path.join(this.unitsDir(), `${id}.json`), 'utf8')) as ReviewUnit;
-    } catch {
-      return null;
+      raw = fs.readFileSync(path.join(this.unitsDir(), `${id}.json`), 'utf8');
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw e;
     }
+    // Corrupt JSON is surfaced to the caller rather than hidden as "not found".
+    return JSON.parse(raw) as ReviewUnit;
   }
 
   private all(): ReviewUnit[] {
@@ -33,8 +51,12 @@ export class UnitStore {
     const units: ReviewUnit[] = [];
     for (const name of fs.readdirSync(dir)) {
       if (!name.endsWith('.json')) continue;
-      const u = this.get(name.slice(0, -'.json'.length));
-      if (u) units.push(u);
+      try {
+        const u = this.get(name.slice(0, -'.json'.length));
+        if (u) units.push(u);
+      } catch (e) {
+        console.warn(`[store] skipping unreadable unit file ${name}: ${(e as Error).message}`);
+      }
     }
     return units;
   }

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -63,11 +63,57 @@ describe('UnitStore', () => {
   });
 });
 
+describe('UnitStore edge cases', () => {
+  it('saving the same id twice overwrites', () => {
+    const store = new UnitStore();
+    store.save(makeUnit('u1', 's1', '2026-01-01T00:00:00.000Z'));
+    store.save({ ...makeUnit('u1', 's1', '2026-01-01T00:00:00.000Z'), status: 'submitted' });
+    expect(store.get('u1')?.status).toBe('submitted');
+    expect(fs.readdirSync(path.join(home, 'units'))).toEqual(['u1.json']);
+  });
+
+  it('get returns null for a missing unit and throws on corrupt JSON', () => {
+    const store = new UnitStore();
+    expect(store.get('nope')).toBeNull();
+    fs.writeFileSync(path.join(home, 'units', 'bad.json'), '{not json');
+    expect(() => store.get('bad')).toThrow();
+  });
+
+  it('list methods skip corrupt files with a warning', () => {
+    const store = new UnitStore();
+    store.save(makeUnit('ok', 's1', '2026-01-01T00:00:00.000Z'));
+    fs.writeFileSync(path.join(home, 'units', 'bad.json'), '{not json');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(store.listBySession('s1').map((u) => u.id)).toEqual(['ok']);
+    expect(store.listSessions()).toHaveLength(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('bad.json'));
+    warn.mockRestore();
+  });
+
+  it('recreates a missing data dir', () => {
+    const store = new UnitStore();
+    fs.rmSync(home, { recursive: true, force: true });
+    store.save(makeUnit('u1', 's1', '2026-01-01T00:00:00.000Z'));
+    expect(store.get('u1')?.id).toBe('u1');
+  });
+});
+
 describe('ensureToken', () => {
   it('ensureToken is stable', () => {
     const a = ensureToken();
     const b = ensureToken();
     expect(a).toBe(b);
     expect(a).toHaveLength(64);
+  });
+
+  it('regenerates an empty token file', () => {
+    fs.writeFileSync(path.join(home, 'token'), '');
+    expect(ensureToken()).toHaveLength(64);
+  });
+
+  it('rethrows non-ENOENT read errors instead of overwriting', () => {
+    fs.mkdirSync(path.join(home, 'token'));
+    expect(() => ensureToken()).toThrow();
+    expect(fs.statSync(path.join(home, 'token')).isDirectory()).toBe(true);
   });
 });

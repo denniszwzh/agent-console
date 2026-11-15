@@ -13,15 +13,34 @@ export function dataDir(): string {
   return dir;
 }
 
+function isCode(e: unknown, code: string): boolean {
+  return (e as NodeJS.ErrnoException)?.code === code;
+}
+
+function readTokenFile(file: string): string | null {
+  try {
+    return fs.readFileSync(file, 'utf8').trim() || null;
+  } catch (e) {
+    if (isCode(e, 'ENOENT')) return null;
+    throw e;
+  }
+}
+
 export function ensureToken(): string {
   const file = path.join(dataDir(), 'token');
-  try {
-    const existing = fs.readFileSync(file, 'utf8').trim();
-    if (existing) return existing;
-  } catch {
-    // fall through and create a new token
-  }
+  const existing = readTokenFile(file);
+  if (existing) return existing;
   const token = crypto.randomBytes(32).toString('hex');
+  try {
+    // 'wx' makes creation race-safe. Mode 0o600 has no effect on Windows.
+    fs.writeFileSync(file, token, { mode: 0o600, flag: 'wx' });
+    return token;
+  } catch (e) {
+    if (!isCode(e, 'EEXIST')) throw e;
+  }
+  // Another process created the file first (or it exists but is empty).
+  const winner = readTokenFile(file);
+  if (winner) return winner;
   fs.writeFileSync(file, token, { mode: 0o600 });
   return token;
 }
