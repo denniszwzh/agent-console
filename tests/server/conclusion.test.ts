@@ -169,16 +169,39 @@ describe('prompt hook', () => {
     expect((await prompt(setup().app, '')).statusCode).toBe(400);
   });
 
-  it('injects once, oldest first', async () => {
+  const ack = (app: ReturnType<typeof buildApp>, unitId: unknown) =>
+    app.inject({ method: 'POST', url: '/api/hooks/claude/prompt/ack', headers, payload: { unitId } });
+
+  it('injects oldest first, prefixed with the bundle path, and only an ack marks it delivered', async () => {
     const { store, app } = setup();
     store.save(unit({ id: 'new', createdAt: '2026-02-01T00:00:00.000Z', status: 'submitted', threads: [thread('n')] }));
     store.save(unit({ id: 'old', createdAt: '2026-01-01T00:00:00.000Z', status: 'submitted', threads: [thread('o')] }));
     const first = (await prompt(app)).json();
-    expect(first.action).toBe('inject');
+    expect(first).toMatchObject({ action: 'inject', unitId: 'old' });
+    expect(first.text.split('\n')[0]).toContain(join(home, 'conclusions', 'old.md'));
     expect(first.text).toContain('conclusion o');
+    expect(store.get('old')!.delivered).toBe(false);
+
+    // No ack (hook killed before it could confirm): the same unit is injected again.
+    expect((await prompt(app)).json()).toMatchObject({ action: 'inject', unitId: 'old' });
+
+    expect((await ack(app, 'old')).statusCode).toBe(200);
     expect(store.get('old')!.delivered).toBe(true);
-    expect((await prompt(app)).json().text).toContain('conclusion n');
+    const second = (await prompt(app)).json();
+    expect(second).toMatchObject({ action: 'inject', unitId: 'new' });
+    expect(second.text).toContain('conclusion n');
+    await ack(app, 'new');
     expect((await prompt(app)).json()).toEqual({ action: 'none' });
+  });
+
+  it('ack validates the unit id', async () => {
+    const { store, app } = setup();
+    expect((await ack(app, 5)).statusCode).toBe(400);
+    expect((await ack(app, '../x')).statusCode).toBe(400);
+    expect((await ack(app, 'missing')).statusCode).toBe(404);
+    store.save(unit({ status: 'open' }));
+    expect((await ack(app, 'u1')).statusCode).toBe(409);
+    expect(store.get('u1')!.delivered).toBe(false);
   });
 
   it('hardGate false never blocks', async () => {

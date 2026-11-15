@@ -5,7 +5,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { callServer } from '../../src/hooks/client.js';
-import { promptOutput } from '../../src/hooks/claude-prompt.js';
+import { promptOutput, runPromptHook } from '../../src/hooks/claude-prompt.js';
 
 let dir: string;
 beforeEach(() => {
@@ -81,5 +81,41 @@ describe('hook scripts', () => {
     expect(JSON.parse(promptOutput({ action: 'block', reason: 'r' }))).toEqual({ decision: 'block', reason: 'r' });
     expect(promptOutput({ action: 'none' })).toBe('');
     expect(promptOutput(null)).toBe('');
+  });
+});
+
+describe('runPromptHook two-phase delivery (R-F1)', () => {
+  it('writes the injected text first, then acks the unit', async () => {
+    const order: string[] = [];
+    const calls: [string, string, unknown][] = [];
+    const call = async (method: 'GET' | 'POST', url: string, body?: unknown) => {
+      calls.push([method, url, body]);
+      order.push(`${method} ${url.split('?')[0]}`);
+      return method === 'GET' ? { action: 'inject', text: 'BUNDLE', unitId: 'u1' } : { ok: true };
+    };
+    const write = async (s: string) => {
+      order.push(`write ${s}`);
+    };
+    await runPromptHook('{"session_id":"sess 1"}', call, write);
+    expect(order).toEqual(['GET /api/hooks/claude/prompt', 'write BUNDLE', 'POST /api/hooks/claude/prompt/ack']);
+    expect(calls[0][1]).toBe('/api/hooks/claude/prompt?session=sess%201');
+    expect(calls[1][2]).toEqual({ unitId: 'u1' });
+  });
+
+  it('does not ack a block or none answer, nor when the write fails', async () => {
+    for (const res of [{ action: 'block', reason: 'r' }, { action: 'none' }]) {
+      const posts: string[] = [];
+      await runPromptHook('{"session_id":"s"}', async (m, u) => (m === 'POST' ? (posts.push(u), {}) : res), async () => {});
+      expect(posts).toEqual([]);
+    }
+    const posts: string[] = [];
+    await runPromptHook(
+      '{"session_id":"s"}',
+      async (m, u) => (m === 'POST' ? (posts.push(u), {}) : { action: 'inject', text: 'x', unitId: 'u1' }),
+      async () => {
+        throw new Error('EPIPE');
+      },
+    ).catch(() => {});
+    expect(posts).toEqual([]);
   });
 });

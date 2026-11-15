@@ -150,7 +150,7 @@ describe('UnitStore unit id safety (final review item 5)', () => {
   it('get returns null and save throws for ids that are not safe file names', () => {
     const store = new UnitStore();
     fs.writeFileSync(path.join(home, 'outside.json'), JSON.stringify(makeUnit('outside', 's1', '2026-01-01T00:00:00.000Z')));
-    for (const id of ['../outside', '..\outside', '.hidden', '', 'a/b']) {
+    for (const id of ['../outside', '..\\outside', '.hidden', '', 'a/b']) {
       expect(store.get(id)).toBeNull();
       expect(() => store.save(makeUnit(id, 's1', '2026-01-01T00:00:00.000Z'))).toThrow(/unit id/);
     }

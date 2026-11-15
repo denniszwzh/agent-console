@@ -11,14 +11,33 @@ export function promptOutput(res: unknown): string {
   return '';
 }
 
+type Call = (method: 'GET' | 'POST', urlPath: string, body?: unknown) => Promise<unknown | null>;
+
+function writeStdout(s: string): Promise<void> {
+  return new Promise((resolve, reject) => process.stdout.write(s, (e) => (e ? reject(e) : resolve())));
+}
+
+/**
+ * Two-phase delivery: fetch, write to stdout, and only then ack the unit so the server marks it
+ * delivered. If we die before the ack, the next prompt injects the same conclusions again.
+ */
+export async function runPromptHook(stdin: string, call: Call = callServer, write = writeStdout): Promise<void> {
+  const input = JSON.parse(stdin) as { session_id?: unknown };
+  if (typeof input?.session_id !== 'string' || !input.session_id) return;
+  const res = await call('GET', `/api/hooks/claude/prompt?session=${encodeURIComponent(input.session_id)}`);
+  const out = promptOutput(res);
+  if (!out) return;
+  await write(out);
+  const unitId = (res as { action?: unknown; unitId?: unknown }).unitId;
+  if ((res as { action?: unknown }).action === 'inject' && typeof unitId === 'string') {
+    await call('POST', '/api/hooks/claude/prompt/ack', { unitId });
+  }
+}
+
 async function main(): Promise<void> {
   if (process.env.AGENT_CONSOLE_FORK === '1') return;
   try {
-    const input = JSON.parse(await readStdin()) as { session_id?: unknown };
-    if (typeof input?.session_id !== 'string' || !input.session_id) return;
-    const res = await callServer('GET', `/api/hooks/claude/prompt?session=${encodeURIComponent(input.session_id)}`);
-    const out = promptOutput(res);
-    if (out) process.stdout.write(out);
+    await runPromptHook(await readStdin());
   } catch {
     // Never disturb the Claude session.
   }

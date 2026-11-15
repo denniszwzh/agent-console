@@ -66,3 +66,10 @@ export function readServerInfo(): { port: number } | null {
     return null;
   }
 }
+
+/** Absolute path of a unit's conclusion bundle file (its directory is created on demand). */
+export function conclusionFile(unitId: string): string {
+  const dir = path.join(dataDir(), 'conclusions');
+  fs.mkdirSync(dir, { recursive: true });
+  return path.resolve(dir, `${unitId}.md`);
+}

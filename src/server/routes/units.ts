@@ -6,7 +6,7 @@ import { codexInstruction, type CodexQueueRunner } from '../../agents/codex.js';
 import { buildConclusionBundle } from '../conclusion.js';
 import type { EventBus } from '../events.js';
 import { resolveUnitImage } from '../images.js';
-import { dataDir } from '../paths.js';
+import { conclusionFile } from '../paths.js';
 import { takeSnapshot } from '../snapshot.js';
 import type { UnitStore } from '../store.js';
 import { ConflictError, NotFoundError, ValidationError, type ThreadEngine } from '../threads.js';
@@ -168,9 +168,7 @@ export function registerUnitRoutes(
       if (!unit) throw new NotFoundError('unit not found');
       if (!engine.canSubmit(id)) throw new ConflictError('unit cannot be submitted: open threads remain or unit is not open');
       const bundle = buildConclusionBundle(unit);
-      const dir = path.join(dataDir(), 'conclusions');
-      fs.mkdirSync(dir, { recursive: true });
-      const file = path.resolve(dir, `${id}.md`);
+      const file = conclusionFile(id);
       fs.writeFileSync(file, bundle);
       // Mark submitted before any await so a concurrent submit gets 409.
       unit.status = 'submitted';

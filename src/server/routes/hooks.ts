@@ -10,6 +10,7 @@ import type { EventBus } from '../events.js';
 import type { UnitStore } from '../store.js';
 import type { ForkRegistry } from '../app.js';
 import { buildConclusionBundle } from '../conclusion.js';
+import { conclusionFile } from '../paths.js';
 
 interface StopBody {
   session_id?: unknown;
@@ -97,10 +98,10 @@ export function registerHookRoutes(
       .filter((u) => u.status === 'submitted' && !u.delivered)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
     if (pending) {
-      pending.delivered = true;
-      store.save(pending);
-      bus.emit({ type: 'unit.updated', unitId: pending.id, sessionId: session });
-      return { action: 'inject', text: buildConclusionBundle(pending) };
+      // Two-phase delivery: only the hook's ack (after it wrote the text) marks the unit delivered,
+      // so a hook killed mid-way re-injects next time instead of losing the conclusions.
+      const text = `Conclusions file: ${conclusionFile(pending.id)}\n\n${buildConclusionBundle(pending)}`;
+      return { action: 'inject', text, unitId: pending.id };
     }
 
     if (config.hardGate) {
@@ -116,5 +117,19 @@ export function registerHookRoutes(
       }
     }
     return { action: 'none' };
+  });
+
+  app.post('/api/hooks/claude/prompt/ack', async (req, reply) => {
+    const unitId = ((req.body ?? {}) as { unitId?: unknown }).unitId;
+    if (!isSafeId(unitId)) return reply.code(400).send({ error: 'unitId required' });
+    const unit = store.get(unitId);
+    if (!unit) return reply.code(404).send({ error: 'unit not found' });
+    if (unit.status !== 'submitted') return reply.code(409).send({ error: `unit is ${unit.status}` });
+    if (!unit.delivered) {
+      unit.delivered = true;
+      store.save(unit);
+      bus.emit({ type: 'unit.updated', unitId: unit.id, sessionId: unit.sessionId });
+    }
+    return { ok: true };
   });
 }
