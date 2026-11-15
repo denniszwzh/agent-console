@@ -4,7 +4,9 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Anchor } from '../../shared/types.js';
 import { buildConclusionBundle } from '../conclusion.js';
 import type { EventBus } from '../events.js';
+import { resolveUnitImage } from '../images.js';
 import { dataDir } from '../paths.js';
+import { takeSnapshot } from '../snapshot.js';
 import type { UnitStore } from '../store.js';
 import { ConflictError, NotFoundError, ValidationError, type ThreadEngine } from '../threads.js';
 
@@ -103,6 +105,37 @@ export function registerUnitRoutes(
       return engine.getThread(id);
     }),
   );
+
+  app.post('/api/units/:id/files', async (req, reply) =>
+    handle(reply, () => {
+      const { id } = req.params as { id: string };
+      const filePath = ((req.body ?? {}) as { path?: unknown }).path;
+      if (typeof filePath !== 'string' || !filePath.trim()) throw new ValidationError('path is required');
+      const unit = store.get(id);
+      if (!unit) throw new NotFoundError('unit not found');
+      if (unit.status !== 'open') throw new ConflictError(`unit is ${unit.status}`);
+      const source = takeSnapshot(filePath.trim(), unit.cwd);
+      unit.files.push(source);
+      store.save(unit);
+      bus.emit({ type: 'unit.updated', unitId: id, sessionId: unit.sessionId });
+      return source;
+    }),
+  );
+
+  app.get('/api/units/:id/image', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const requested = (req.query as { path?: unknown }).path;
+    const unit = store.get(id);
+    const image = unit && typeof requested === 'string' ? resolveUnitImage(unit, requested) : null;
+    if (!image) return reply.code(404).send({ error: 'not found' });
+    return reply
+      .header('Content-Type', image.contentType)
+      .header('X-Content-Type-Options', 'nosniff')
+      // Neutralises scripts in SVG if the image is ever opened directly.
+      .header('Content-Security-Policy', 'sandbox')
+      .header('Cache-Control', 'no-store')
+      .send(fs.createReadStream(image.file));
+  });
 
   app.post('/api/units/:id/submit', async (req, reply) =>
     handle(reply, () => {

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { AgentAdapter, AgentEvent } from '../agents/adapter.js';
 import { splitBlocks } from '../shared/blocks.js';
+import { canSubmit as canSubmitUnit } from '../shared/gate.js';
 import type { AgentKind, Anchor, Message, ReviewUnit, Thread } from '../shared/types.js';
 import type { EventBus } from './events.js';
 import { conclusionPrompt, questionPrompt } from './prompts.js';
@@ -99,8 +100,7 @@ export class ThreadEngine {
   }
 
   canSubmit(unitId: string): boolean {
-    const unit = this.loadUnit(unitId);
-    return unit.status === 'open' && unit.threads.length > 0 && unit.threads.every((t) => t.status === 'resolved');
+    return canSubmitUnit(this.loadUnit(unitId));
   }
 
   // ---- actions -------------------------------------------------------------

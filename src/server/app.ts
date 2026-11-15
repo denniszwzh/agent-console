@@ -1,5 +1,9 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import type { ServerResponse } from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import type { UnitStore } from './store.js';
 import { EventBus } from './events.js';
@@ -22,6 +26,8 @@ export interface AppDeps {
   bus?: EventBus;
   engine?: ThreadEngine;
   config?: Config;
+  /** Directory of the built web UI; defaults to <package>/dist/web. */
+  webRoot?: string;
 }
 
 declare module 'fastify' {
@@ -32,6 +38,22 @@ declare module 'fastify' {
 }
 
 export const COOKIE_NAME = 'ac_token';
+
+// Resolves to <package>/dist/web from both src/server and dist/server.
+const DEFAULT_WEB_ROOT = fileURLToPath(new URL('../../dist/web/', import.meta.url));
+
+const WEB_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join('; ');
 
 function safeEqual(a: string, b: string): boolean {
   const ba = Buffer.from(a);
@@ -141,6 +163,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerHookRoutes(api, { store, bus, config: deps.config ?? readConfig(), forks: deps.forks ?? deps.engine });
     if (deps.engine) registerUnitRoutes(api, { engine: deps.engine, store, bus });
   });
+
+  // The built UI is public (it holds no data); every /api call still needs the token.
+  const webRoot = deps.webRoot ?? DEFAULT_WEB_ROOT;
+  if (fs.existsSync(path.join(webRoot, 'index.html'))) {
+    app.register(fastifyStatic, {
+      root: webRoot,
+      index: 'index.html',
+      // Defence in depth: the page may only load from this server (plus data: images).
+      setHeaders: (reply) => {
+        reply.header('Content-Security-Policy', WEB_CSP);
+      },
+    });
+  }
 
   app.addHook('onClose', async () => {
     for (const s of sseClients) s.destroy();
