@@ -16,6 +16,10 @@ const ALLOW: GuardDecision = { allow: true, reason: 'read-only command' };
 // Command names, POSIX tools are matched case-sensitively, PowerShell cmdlets case-insensitively.
 const POSIX_COMMANDS = new Set(['git', 'ls', 'dir', 'cat', 'type', 'head', 'tail', 'wc']);
 const CMDLETS = new Set(['get-content', 'get-childitem']);
+const POWERSHELL_ALIASES: Record<string, string> = {
+  cat: 'get-content', type: 'get-content', gc: 'get-content',
+  ls: 'get-childitem', dir: 'get-childitem', gci: 'get-childitem',
+};
 const GIT_SUBCOMMANDS = new Set(['log', 'diff', 'show', 'status', 'blame', 'branch']);
 const GIT_BRANCH_ARGS = new Set(['-a', '-r', '--list', '-v']);
 
@@ -28,7 +32,7 @@ const GIT_DENIED_LONG = ['--output', '--ext-diff', '--textconv', '--show-signatu
 // the option denylists below are sound. `=` is rejected too (allowlisted tools take `--opt value`).
 // Control characters (incl. tab, newline, C1 such as U+0085) are rejected. Glob characters * ? [ ] are rejected too: Bash would expand them
 // into repo filenames that look like options (a file named `--output=a.txt`) after approval.
-const FORBIDDEN_CHARS = /['"`\u2018-\u201f${}<>|;&()!#=@%*?[\]\u0000-\u001f\u007f-\u009f]/;
+const FORBIDDEN_CHARS = /['"`\u2018-\u201f${}<>|;&()!#=@%*?[\]‐-―−\u0000-\u001f\u007f-\u009f]/;
 // `~` is only meaningful (home expansion) at the start of a token, so HEAD~1 is fine.
 const BACKSLASH = String.fromCharCode(92);
 const WHITESPACE = /[\s\u0085\u2028\u2029\u00a0]+/u;
@@ -62,7 +66,10 @@ function checkGit(args: string[]): GuardDecision {
 
 function checkTail(args: string[]): GuardDecision {
   // Follow flags (also inside short clusters such as -nf) would hang until the tool times out.
-  const bad = args.find((a) => a === '--follow' || /^-[A-Za-z0-9]*[fF]/.test(a) || a.startsWith('--follow'));
+  // GNU long options may be abbreviated: --f, --fo, --foll ... all mean --follow.
+  const bad = args.find(
+    (a) => /^-[A-Za-z0-9]*[fF]/.test(a) || (/^--[a-z]/.test(a) && 'follow'.startsWith(a.slice(2).split('=')[0])),
+  );
   return bad === undefined ? ALLOW : deny(`tail argument not allowed: ${bad}`);
 }
 
@@ -89,6 +96,10 @@ export function decideGuard(toolName: string, command: string): GuardDecision {
   for (const t of [first, ...args]) {
     if (t.startsWith('~')) return deny('home expansion is not allowed');
     if (t.includes('//') || t.includes('::')) return deny('UNC paths and provider paths are not allowed');
+    // Windows treats any mix of two leading separators (/\host, \/host) as UNC.
+    const sep = (c: string | undefined) => c === '/' || c === BACKSLASH;
+    if (sep(t[0]) && sep(t[1])) return deny('UNC paths are not allowed');
+    if (t.includes('/' + BACKSLASH) || t.includes(BACKSLASH + '/')) return deny('mixed path separators are not allowed');
     if (t.includes(BACKSLASH + BACKSLASH) || (powershell && t.startsWith(BACKSLASH))) {
       return deny('UNC paths are not allowed');
     }
@@ -96,6 +107,11 @@ export function decideGuard(toolName: string, command: string): GuardDecision {
     if (t.includes('/dev/tcp') || t.includes('/dev/udp')) return deny('network device paths are not allowed');
   }
 
+  if (powershell) {
+    // cat/type/gc and ls/dir/gci are cmdlet aliases in PowerShell: apply the cmdlet checks to them too.
+    const alias = POWERSHELL_ALIASES[first.toLowerCase()];
+    if (alias) return checkCmdlet(cmd, args);
+  }
   if (POSIX_COMMANDS.has(first)) {
     if (first === 'git') return checkGit(args);
     if (first === 'tail') return checkTail(args);

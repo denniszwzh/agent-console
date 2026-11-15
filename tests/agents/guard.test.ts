@@ -208,7 +208,13 @@ describe('decideGuard round 2 (shrunk allowlist, globs, UNC, follow flags)', () 
     'tail -F x',
     'tail -nf 5 x',
     'tail --follow x',
-    'tail --follow x',
+    'tail --f x',
+    'tail --fo x',
+    'tail --foll x',
+    'tail -n 5 --f x',
+    'cat –Wait x',
+    'ls −x',
+    'ls ‐x',
     'cat a::b',
     'ls *',
     'ls a?',
@@ -218,6 +224,22 @@ describe('decideGuard round 2 (shrunk allowlist, globs, UNC, follow flags)', () 
   });
 
   const ps = [
+    'git diff --no-index /' + BS + 'host' + BS + 's' + BS + 'a b',
+    'git blame --contents /' + BS + 'host' + BS + 's' + BS + 'x a',
+    'Get-Content /' + BS + '.' + BS + 'UNC' + BS + 'host' + BS + 'share',
+    'Get-Content ' + BS + '/host/s',
+    'Get-Content –Wait x',
+    'Get-Content —Wait x',
+    'Get-Content ―Wait x',
+    'Get-Content −Wait x',
+    'cat -Wait x',
+    'type -Wait x',
+    'gc -Wait x',
+    'cat -wait x',
+    'cat -Command x',
+    'ls -Wait x',
+    'gci -Wait x',
+    'dir -Wait x',
     'Get-Content -Path:' + BS + 'host' + BS + 'share' + BS + 'x',
     'Get-Content FileSystem::' + BS + 'host' + BS + 'share',
     'Get-Content -Wait x',
@@ -246,6 +268,13 @@ describe('decideGuard round 2 (shrunk allowlist, globs, UNC, follow flags)', () 
     expect(allow('Get-ChildItem src', 'PowerShell')).toBe(true);
     expect(allow('Get-ChildItem C:' + BS + 'repo' + BS + 'src', 'PowerShell')).toBe(true);
     expect(allow('git log -5', 'PowerShell')).toBe(true);
+  });
+
+  it('allows PowerShell aliases of the kept cmdlets', () => {
+    expect(allow('cat a.md', 'PowerShell')).toBe(true);
+    expect(allow('gc a.md', 'PowerShell')).toBe(true);
+    expect(allow('gci src', 'PowerShell')).toBe(true);
+    expect(allow('ls src', 'PowerShell')).toBe(true);
   });
 
   it('still allows tail without follow flags', () => {
