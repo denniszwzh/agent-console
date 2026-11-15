@@ -74,6 +74,16 @@ describe('POST /api/hooks/codex/stop', () => {
     expect(store.get(second)!.status).toBe('open');
   });
 
+  it('400 for a session id that could be parsed as a flag (codex and claude routes)', async () => {
+    const app = buildApp({ store: new UnitStore(), token: TOKEN, port: PORT });
+    for (const url of ['/api/hooks/codex/stop', '/api/hooks/claude/stop']) {
+      for (const bad of ['--oss', '-x', 'a b', '.hidden']) {
+        const res = await app.inject({ method: 'POST', url, headers, payload: { session_id: bad, cwd: work } });
+        expect(res.statusCode).toBe(400);
+      }
+    }
+  });
+
   it('400 without session_id or cwd', async () => {
     const app = buildApp({ store: new UnitStore(), token: TOKEN, port: PORT });
     expect((await stop(app, { cwd: work })).statusCode).toBe(400);
@@ -150,6 +160,21 @@ describe('submit for a codex unit', () => {
       expect(store.get('u1')!.delivery?.queued).toBe(false);
       expect(store.get('u1')!.status).toBe('submitted');
     }
+  });
+
+  it('marks the unit submitted before awaiting the queue: a concurrent submit gets 409', async () => {
+    let release!: (v: boolean) => void;
+    const { store, app } = setup(() => new Promise<boolean>((r) => (release = r)));
+    store.save(unit('codex'));
+    const first = app.inject({ method: 'POST', url: '/api/units/u1/submit', headers });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(store.get('u1')!.status).toBe('submitted');
+    expect((await app.inject({ method: 'POST', url: '/api/units/u1/submit', headers })).statusCode).toBe(409);
+    release(true);
+    const res = await first;
+    expect(res.statusCode).toBe(200);
+    expect(res.json().queued).toBe(true);
+    expect(store.get('u1')!.delivery?.queued).toBe(true);
   });
 
   it('does not touch the queue for a claude unit', async () => {

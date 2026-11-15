@@ -30,6 +30,10 @@ describe('buildCodexArgs', () => {
   it('never puts the prompt in argv', () => {
     expect(buildCodexArgs(req).join(' ')).not.toContain('SECRET');
   });
+
+  it('rejects ids that could be parsed as flags', () => {
+    for (const bad of ['--oss', '-c', '', 'a b', 'x;y']) expect(() => buildCodexArgs({ ...req, parentSessionId: bad })).toThrow(/invalid/i);
+  });
 });
 
 describe('parseCodexStream', () => {
@@ -79,8 +83,27 @@ describe('parseCodexStream', () => {
       { type: 'session', sessionId: 't' },
       { type: 'error', message: 'rate limited' },
     ]);
-    const err = await collect(parseCodexStream(lines([JSON.stringify({ type: 'error', message: 'boom' })])));
-    expect(err).toEqual([{ type: 'error', message: 'boom' }]);
+  });
+
+  it('treats a transient error event as non-terminal: a later turn.completed still gives done', async () => {
+    const ev = await collect(
+      parseCodexStream(
+        lines([
+          JSON.stringify({ type: 'thread.started', thread_id: 't' }),
+          JSON.stringify({ type: 'error', message: 'Reconnecting... 1/5' }),
+          JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'ok' } }),
+          JSON.stringify({ type: 'turn.completed' }),
+        ]),
+      ),
+    );
+    expect(ev.map((e) => e.type)).toEqual(['session', 'text', 'done']);
+  });
+
+  it('reports the last error message when the stream ends without turn.completed', async () => {
+    const ev = await collect(
+      parseCodexStream(lines([JSON.stringify({ type: 'error', message: 'first' }), JSON.stringify({ type: 'error', message: 'boom' })])),
+    );
+    expect(ev).toEqual([{ type: 'error', message: 'boom' }]);
   });
 
   it('skips garbage and blank lines; a stream without turn.completed yields no terminal event', async () => {
@@ -166,6 +189,13 @@ describe('createCodexAdapter.run', () => {
     expect(ev[ev.length - 1].type).toBe('error');
   });
 
+  it('reports an invalid parent id as an error event instead of spawning', async () => {
+    const adapter = createCodexAdapter({ bin: path.join(home, 'no-such-binary') });
+    const ev = await collect(adapter.run({ parentSessionId: '--oss', fork: true, prompt: 'x', cwd: home }));
+    expect(ev).toHaveLength(1);
+    expect(ev[0].type).toBe('error');
+  });
+
   it('kills the child and reports aborted', async () => {
     const adapter = fake(`setInterval(() => {}, 1000);`);
     const ctl = new AbortController();
@@ -198,6 +228,20 @@ describe('createCodexQueueRunner', () => {
     const run = fake(`import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(out)}, JSON.stringify(process.argv.slice(2)));`);
     expect(await run('thr-1', 'hello "x"')).toBe(true);
     expect(JSON.parse(fs.readFileSync(out, 'utf8'))).toEqual(['queue', '--thread', 'thr-1', '--message', 'hello "x"']);
+  });
+
+  it('sets AGENT_CONSOLE_FORK=1 for the queue child', async () => {
+    const out = path.join(home, 'env.txt');
+    const run = fake(`import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(out)}, String(process.env.AGENT_CONSOLE_FORK));`);
+    expect(await run('t', 'm')).toBe(true);
+    expect(fs.readFileSync(out, 'utf8')).toBe('1');
+  });
+
+  it('resolves false without spawning for a flag-like thread id', async () => {
+    const out = path.join(home, 'ran.txt');
+    const run = fake(`import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(out)}, 'x');`);
+    expect(await run('--resume', 'm')).toBe(false);
+    expect(fs.existsSync(out)).toBe(false);
   });
 
   it('resolves false (never rejects) on non-zero exit, spawn failure and timeout', async () => {

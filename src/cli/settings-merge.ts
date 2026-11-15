@@ -1,3 +1,5 @@
+export class HooksShapeError extends Error {}
+
 type Json = Record<string, unknown>;
 type Group = { matcher?: string; hooks?: Array<{ type?: string; command?: string }> };
 
@@ -59,7 +61,7 @@ export function removeHooks(settings: object): object {
 function assertHooksShape(settings: object): void {
   const h = (settings as Json).hooks;
   if (h !== undefined && (h === null || typeof h !== 'object' || Array.isArray(h))) {
-    throw new Error('settings.json "hooks" is not an object; refusing to modify it');
+    throw new HooksShapeError('"hooks" is not an object; refusing to modify it');
   }
 }
 

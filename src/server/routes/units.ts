@@ -172,17 +172,21 @@ export function registerUnitRoutes(
       fs.mkdirSync(dir, { recursive: true });
       const file = path.resolve(dir, `${id}.md`);
       fs.writeFileSync(file, bundle);
+      // Mark submitted before any await so a concurrent submit gets 409.
+      unit.status = 'submitted';
+      unit.delivered = false;
+      store.save(unit);
+      bus.emit({ type: 'unit.updated', unitId: id, sessionId: unit.sessionId });
       let queued = false;
       if (unit.agent === 'codex') {
         // Best effort: the UI always offers a copy button too; a queue failure never fails the submit.
         const instruction = codexInstruction(file);
         queued = await codexQueue(unit.sessionId, instruction).catch(() => false);
-        unit.delivery = { queued, instruction };
+        const fresh = store.get(id) ?? unit;
+        fresh.delivery = { queued, instruction };
+        store.save(fresh);
+        bus.emit({ type: 'unit.updated', unitId: id, sessionId: fresh.sessionId });
       }
-      unit.status = 'submitted';
-      unit.delivered = false;
-      store.save(unit);
-      bus.emit({ type: 'unit.updated', unitId: id, sessionId: unit.sessionId });
       return { bundle, queued };
     }),
   );

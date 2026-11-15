@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { addCodexHooks, addHooks, assertRecognisable, removeHooks } from './settings-merge.js';
+import { addCodexHooks, addHooks, assertRecognisable, HooksShapeError, removeHooks } from './settings-merge.js';
 import { start } from '../server/main.js';
 import { ensureToken, readConfig } from '../server/paths.js';
 
@@ -48,7 +48,13 @@ export async function applyChange(
   log: (s: string) => void = console.log,
 ): Promise<boolean> {
   const before = readSettings(settingsPath);
-  const after = transform(before); // throws on an unsafe settings shape
+  let after: object;
+  try {
+    after = transform(before); // throws on an unsafe settings shape
+  } catch (e) {
+    if (e instanceof HooksShapeError) throw new Error(`"hooks" in ${path.basename(settingsPath)} is not an object; refusing to modify it`);
+    throw e;
+  }
   const b = JSON.stringify(hooksOf(before), null, 2);
   const a = JSON.stringify(hooksOf(after), null, 2);
   if (a === b) {
@@ -115,8 +121,10 @@ export async function runInstall(
     log(`Skipping Codex: ${t.codexDir} does not exist.`);
     return;
   }
-  const changed = await applyChange(path.join(t.codexDir, 'hooks.json'), (s) => addCodexHooks(s, codexCmds), confirm, log);
-  if (changed) log(CODEX_TRUST_NOTICE);
+  const hooksFile = path.join(t.codexDir, 'hooks.json');
+  await applyChange(hooksFile, (s) => addCodexHooks(s, codexCmds), confirm, log);
+  // Remind whenever our hook is present, also when it was already installed.
+  if (JSON.stringify(readSettings(hooksFile)).includes('codex-stop.js')) log(CODEX_TRUST_NOTICE);
 }
 
 export async function runUninstall(

@@ -76,6 +76,21 @@ describe('runInstall / runUninstall (temp dirs only)', () => {
     expect(CODEX_TRUST_NOTICE).toContain('/hooks');
   });
 
+  it('prints the trust notice even when the hook is already installed (nothing to change)', async () => {
+    fs.mkdirSync(codexDir, { recursive: true });
+    await runInstall({ claudeSettings: claude, codexDir }, async () => true, () => {});
+    const logs: string[] = [];
+    await runInstall({ claudeSettings: claude, codexDir }, async () => true, (s) => logs.push(s));
+    expect(logs).toContain('Nothing to change.');
+    expect(logs).toContain(CODEX_TRUST_NOTICE);
+  });
+
+  it('names the offending file in the hooks-shape error', async () => {
+    fs.mkdirSync(codexDir, { recursive: true });
+    fs.writeFileSync(hooksFile, JSON.stringify({ hooks: [] }));
+    await expect(runInstall({ claudeSettings: claude, codexDir }, async () => true, () => {})).rejects.toThrow(/"hooks" in hooks.json/);
+  });
+
   it('declining the Codex change leaves hooks.json untouched and prints no trust notice', async () => {
     fs.mkdirSync(codexDir, { recursive: true });
     const logs: string[] = [];

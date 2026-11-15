@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { AgentKind, Config, ReviewUnit, Source } from '../../shared/types.js';
+import { isSafeId } from '../../shared/ids.js';
 import { splitBlocks } from '../../shared/blocks.js';
 import { findChangedFilesClaude } from '../transcript.js';
 import { findChangedFilesCodex } from '../rollout.js';
@@ -35,6 +36,7 @@ export function registerHookRoutes(
     if (typeof sessionId !== 'string' || !sessionId || typeof cwd !== 'string' || !cwd) {
       return reply.code(400).send({ error: 'session_id and cwd are required' });
     }
+    if (!isSafeId(sessionId)) return reply.code(400).send({ error: 'invalid session_id' });
     if (forks?.isForkSession(sessionId)) return { ignored: true };
 
     const transcriptPath = typeof body.transcript_path === 'string' ? body.transcript_path : '';

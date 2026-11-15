@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
+import { isSafeId } from '../shared/ids.js';
 import type { AgentAdapter, AgentEvent, RunRequest } from './adapter.js';
 
 const STDERR_TAIL_CHARS = 2000;
@@ -10,6 +11,7 @@ const QUEUE_TIMEOUT_MS = 10_000;
  * The prompt is read from stdin (`-`), never put in argv. `resume` reuses the parent's thread id.
  */
 export function buildCodexArgs(req: RunRequest): string[] {
+  if (!isSafeId(req.parentSessionId)) throw new Error('invalid session id');
   return ['exec', '-s', 'read-only', '--json', req.fork ? 'fork' : 'resume', req.parentSessionId, '-'];
 }
 
@@ -26,6 +28,7 @@ function errorMessage(msg: Json): string {
 export async function* parseCodexStream(lines: AsyncIterable<string>): AsyncIterable<AgentEvent> {
   let sessionSeen = false;
   let lastText = '';
+  let lastError: string | null = null;
   for await (const line of lines) {
     if (!line.trim()) continue;
     let msg: Json;
@@ -50,11 +53,15 @@ export async function* parseCodexStream(lines: AsyncIterable<string>): AsyncIter
     } else if (msg.type === 'turn.completed') {
       yield { type: 'done', finalText: lastText };
       return;
-    } else if (msg.type === 'turn.failed' || msg.type === 'error') {
+    } else if (msg.type === 'turn.failed') {
       yield { type: 'error', message: errorMessage(msg) };
       return;
+    } else if (msg.type === 'error') {
+      // Codex emits transient notices (e.g. "Reconnecting... 1/5"); only the stream end decides.
+      lastError = errorMessage(msg);
     }
   }
+  if (lastError !== null) yield { type: 'error', message: lastError };
 }
 
 export interface CodexAdapterOptions {
@@ -68,7 +75,13 @@ export function createCodexAdapter(opts: CodexAdapterOptions = {}): AgentAdapter
   return {
     kind: 'codex',
     async *run(req, signal) {
-      const args = [...(opts.binArgs ?? []), ...buildCodexArgs(req)];
+      let args: string[];
+      try {
+        args = [...(opts.binArgs ?? []), ...buildCodexArgs(req)];
+      } catch (e) {
+        yield { type: 'error', message: (e as Error).message };
+        return;
+      }
       const child = spawn(bin, args, {
         cwd: req.cwd,
         env: { ...process.env, AGENT_CONSOLE_FORK: '1', GIT_OPTIONAL_LOCKS: '0' },
@@ -145,6 +158,11 @@ export function createCodexQueueRunner(opts: { bin?: string; binArgs?: string[];
   const bin = opts.bin ?? 'codex';
   return (threadId, message) =>
     new Promise<boolean>((resolve) => {
+      if (!isSafeId(threadId)) {
+        console.error('codex queue failed: invalid thread id');
+        resolve(false);
+        return;
+      }
       let settled = false;
       let timer: NodeJS.Timeout | undefined;
       const finish = (ok: boolean, why?: string) => {
@@ -158,6 +176,7 @@ export function createCodexQueueRunner(opts: { bin?: string; binArgs?: string[];
       try {
         child = spawn(bin, [...(opts.binArgs ?? []), 'queue', '--thread', threadId, '--message', message], {
           stdio: ['ignore', 'ignore', 'pipe'],
+          env: { ...process.env, AGENT_CONSOLE_FORK: '1' },
           windowsHide: true,
         });
       } catch (e) {
