@@ -173,6 +173,7 @@ export function registerUnitRoutes(
       // Mark submitted before any await so a concurrent submit gets 409.
       unit.status = 'submitted';
       unit.delivered = false;
+      unit.conclusionsPath = file;
       store.save(unit);
       bus.emit({ type: 'unit.updated', unitId: id, sessionId: unit.sessionId });
       let queued = false;

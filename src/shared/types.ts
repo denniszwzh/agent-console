@@ -71,6 +71,8 @@ export interface ReviewUnit {
   threads: Thread[];
   status: UnitStatus;
   delivered: boolean;
+  /** Absolute path of the conclusion bundle file (set at submit; the UI offers it as a fallback). */
+  conclusionsPath?: string;
   /** Codex only: how a submitted unit was handed back (set at submit). */
   delivery?: { queued: boolean; instruction: string };
   warnings: { at: string; threadId: string; paths: string[] }[];

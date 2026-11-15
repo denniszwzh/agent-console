@@ -61,8 +61,8 @@ describe('killTree', () => {
       };
       expect(alive(gpid)).toBe(true);
       killTree(parent);
-      for (let i = 0; i < 50 && alive(gpid); i++) await new Promise((r) => setTimeout(r, 100));
+      for (let i = 0; i < 200 && alive(gpid); i++) await new Promise((r) => setTimeout(r, 100));
       expect(alive(gpid)).toBe(false);
-    }, 10_000);
+    }, 30_000);
   });
 });

@@ -158,6 +158,7 @@ describe('submit route', () => {
     const saved = store.get('u1')!;
     expect(saved.status).toBe('submitted');
     expect(saved.delivered).toBe(false);
+    expect(saved.conclusionsPath).toBe(file);
   });
 });
 

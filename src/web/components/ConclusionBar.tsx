@@ -76,41 +76,60 @@ function ConclusionItem({ thread }: { thread: Thread }) {
   );
 }
 
-/** What happens after submission depends on the agent. */
-function DeliveryNotice({ unit }: { unit: ReviewUnit }) {
-  if (unit.agent === 'claude') {
-    return (
-      <div className="delivery">
-        {unit.delivered
-          ? '結論已帶入主對話。'
-          : '在 terminal 送出下一則訊息時（例如「套用審查結論」），結論會自動帶入主對話'}
-      </div>
-    );
-  }
-  return <CodexDelivery unit={unit} />;
-}
-
-/** Codex has no prompt hook: the instruction is queued when possible and can always be copied. */
-function CodexDelivery({ unit }: { unit: ReviewUnit }) {
+/** A copy-to-clipboard button that confirms with 已複製. */
+function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
-  const instruction = unit.delivery?.instruction;
-  if (!instruction) return null;
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(instruction);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
     } catch {
       setCopied(false);
     }
   };
   return (
+    <button type="button" className="btn small" onClick={() => void copy()}>
+      {copied ? '已複製' : '複製'}
+    </button>
+  );
+}
+
+/** What happens after submission depends on the agent. */
+function DeliveryNotice({ unit }: { unit: ReviewUnit }) {
+  if (unit.agent === 'claude') return <ClaudeDelivery unit={unit} />;
+  return <CodexDelivery unit={unit} />;
+}
+
+/** Claude gets the bundle via the prompt hook; the file path is the fallback for /clear'ed or closed sessions. */
+function ClaudeDelivery({ unit }: { unit: ReviewUnit }) {
+  return (
     <div className="delivery">
-      {unit.delivery?.queued && <span>已送入佇列。</span>}
-      <span>貼到 Codex 對話即可套用結論：</span>
+      <span>
+        {unit.delivered
+          ? '結論已帶入主對話。'
+          : '在 terminal 送出下一則訊息時（例如「套用審查結論」），結論會自動帶入主對話'}
+      </span>
+      {unit.conclusionsPath && (
+        <>
+          <span>若 session 已 /clear 或關閉，可複製結論檔路徑，請 Claude 讀取並套用：</span>
+          <code>{unit.conclusionsPath}</code>
+          <CopyButton text={unit.conclusionsPath} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Codex has no prompt hook: the instruction is queued when possible and can always be copied. */
+function CodexDelivery({ unit }: { unit: ReviewUnit }) {
+  const instruction = unit.delivery?.instruction;
+  // Submitted, but the queue attempt (up to ~10 s) has not reported back yet.
+  if (!instruction) return <div className="delivery muted">正在送入 Codex 佇列…</div>;
+  return (
+    <div className="delivery">
+      <span>{unit.delivery?.queued ? '已送入佇列；若下一輪沒有帶入，再複製下面的指令貼到 Codex。' : '貼到 Codex 對話即可套用結論：'}</span>
       <code>{instruction}</code>
-      <button type="button" className="btn small" onClick={() => void copy()}>
-        {copied ? '已複製' : '複製'}
-      </button>
+      <CopyButton text={instruction} />
     </div>
   );
 }
@@ -163,9 +182,14 @@ export function ConclusionBar() {
           title={submittable ? '把結論打包送回主對話' : '所有問題串都結束後才能送出'}
           onClick={() => void submit()}
         >
-          送出結論
+          {submitting ? '送出中…' : '送出結論'}
         </button>
       </div>
+      {submitting && (
+        <div className="delivery muted" role="status">
+          正在送出結論…
+        </div>
+      )}
       {unit.status === 'submitted' && <DeliveryNotice unit={unit} />}
     </footer>
   );
