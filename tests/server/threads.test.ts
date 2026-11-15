@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentAdapter, AgentEvent, RunRequest } from '../../src/agents/adapter.js';
@@ -73,12 +74,17 @@ const answer = (sid: string, text = 'An answer'): AgentEvent[] => [
 function setup(
   script: Script,
   concurrency = 3,
-  gitStatus: (cwd: string) => Promise<string | null> = async () => null,
+  /** Returns raw `git status --porcelain -z` output for a repo rooted at `home`, or null (not a repo). */
+  porcelainZ: (cwd: string) => Promise<string | null> = async () => null,
   statPath?: (abs: string) => { mtimeMs: number; size: number } | null,
 ) {
   const store = new UnitStore();
   const bus = new EventBus();
   const adapter = new FakeAdapter(script);
+  const gitStatus = async (cwd: string) => {
+    const status = await porcelainZ(cwd);
+    return status === null ? null : { root: home, status };
+  };
   const engine = new ThreadEngine(store, bus, { claude: adapter }, concurrency, { gitStatus, statPath });
   makeUnit(store);
   return { store, bus, adapter, engine };
@@ -311,7 +317,7 @@ describe('ThreadEngine', () => {
     const { engine, store } = setup(
       () => answer('f'),
       3,
-      async () => (calls++ === 0 ? '' : ' M docs/spec.md\nR  old.md -> new.md\n'),
+      async () => (calls++ === 0 ? '' : ' M docs/spec.md\0R  new.md\0old.md\0'),
     );
     const t = engine.addDraft('unit-1', anchor, 'q');
     engine.sendDrafts('unit-1');
@@ -330,7 +336,7 @@ describe('ThreadEngine', () => {
         return answer('f');
       },
       3,
-      async () => '?? docs/a.md\n M src/b.ts\n',
+      async () => '?? docs/a.md\0 M src/b.ts\0',
       (abs) => stats[abs.split(/[\\/]/).slice(-2).join('/')] ?? { mtimeMs: 5, size: 5 },
     );
     engine.addDraft('unit-1', anchor, 'q');
@@ -343,7 +349,7 @@ describe('ThreadEngine', () => {
     const { engine, store } = setup(
       () => answer('f'),
       3,
-      async () => '?? docs/a.md\n M src/b.ts\n',
+      async () => '?? docs/a.md\0 M src/b.ts\0',
       () => ({ mtimeMs: 1, size: 1 }),
     );
     engine.addDraft('unit-1', anchor, 'q');
@@ -769,5 +775,67 @@ describe('ThreadEngine run timeout and expiry (final review item 3 / R-F2)', () 
     gate.resolve();
     await engine.whenIdle();
     expect(adapter.requests).toHaveLength(1);
+  });
+});
+
+describe('post-check with real git (final review item 4)', () => {
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
+
+  function repo() {
+    const root = join(home, 'repo');
+    mkdirSync(join(root, 'sub'), { recursive: true });
+    git(root, 'init', '-q');
+    writeFileSync(join(root, 'top.md'), 'top\n');
+    writeFileSync(join(root, 'sub', 'inner.md'), 'inner\n');
+    git(root, 'add', '.');
+    git(root, 'commit', '-q', '-m', 'init');
+    return root;
+  }
+
+  function engineFor(root: string, cwd: string, during: () => void) {
+    const store = new UnitStore();
+    makeUnit(store, { cwd });
+    const adapter = new FakeAdapter(() => {
+      during();
+      return answer('f');
+    });
+    // No gitStatus seam: the real git implementation is under test.
+    const engine = new ThreadEngine(store, new EventBus(), { claude: adapter }, 1);
+    return { store, engine, root };
+  }
+
+  async function run(engine: ThreadEngine) {
+    engine.addDraft('unit-1', anchor, 'q');
+    engine.sendDrafts('unit-1');
+    await engine.whenIdle();
+  }
+
+  it('cwd in a subdirectory: a dirty file elsewhere in the repo re-edited during the run is detected', async () => {
+    const root = repo();
+    writeFileSync(join(root, 'top.md'), 'top dirty\n'); // already dirty before the run
+    const { store, engine } = engineFor(root, join(root, 'sub'), () => writeFileSync(join(root, 'top.md'), 'top dirty and edited again\n'));
+    await run(engine);
+    expect(store.get('unit-1')!.warnings.map((w) => w.paths)).toEqual([['top.md']]);
+  });
+
+  it('a non-ASCII (Chinese) filename re-edited while already dirty is detected', async () => {
+    const root = repo();
+    const name = '設計說明.md';
+    writeFileSync(join(root, 'sub', name), '初稿\n'); // untracked before the run
+    const { store, engine } = engineFor(root, join(root, 'sub'), () => writeFileSync(join(root, 'sub', name), '初稿，之後又改了一次\n'));
+    await run(engine);
+    expect(store.get('unit-1')!.warnings.map((w) => w.paths)).toEqual([[`sub/${name}`]]);
+  });
+
+  it('reports a rename target and no warning when nothing changed', async () => {
+    const root = repo();
+    const quiet = engineFor(root, root, () => {});
+    await run(quiet.engine);
+    expect(quiet.store.get('unit-1')!.warnings).toEqual([]);
+    rmSync(join(home, 'units'), { recursive: true, force: true });
+    const { store, engine } = engineFor(root, root, () => git(root, 'mv', 'top.md', '名前.md'));
+    await run(engine);
+    expect(store.get('unit-1')!.warnings.map((w) => w.paths)).toEqual([['名前.md']]);
   });
 });
