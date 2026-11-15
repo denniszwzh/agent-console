@@ -559,3 +559,94 @@ describe('ThreadEngine fix round 1', () => {
     }
   });
 });
+
+describe('ThreadEngine ancestor reopening (final review item 1)', () => {
+  /** Answers every run; conclusion runs (resume, non-fork) return a one-line conclusion. */
+  const script: Script = (req, n) => (req.fork ? answer(`fork-${n}`) : answer(req.parentSessionId, 'Concluded.'));
+
+  async function answered(engine: ThreadEngine, parentId?: string) {
+    const t = engine.addDraft('unit-1', anchor, 'q', parentId);
+    engine.sendDrafts('unit-1');
+    await engine.whenIdle();
+    return t;
+  }
+
+  it('adding a child under a resolved parent reopens the parent', async () => {
+    const { engine, store } = setup(script);
+    const p = await answered(engine);
+    engine.setConclusion(p.id, 'parent decision');
+    expect(engine.getThread(p.id).status).toBe('resolved');
+    engine.addDraft('unit-1', anchor, 'child q', p.id);
+    expect(store.get('unit-1')!.threads.find((t) => t.id === p.id)).toMatchObject({
+      status: 'awaiting',
+      conclusion: null,
+      noConclusion: false,
+    });
+  });
+
+  it('a follow-up on a resolved child reopens its resolved parent', async () => {
+    const { engine } = setup(script);
+    const p = await answered(engine);
+    const c = await answered(engine, p.id);
+    engine.setConclusion(c.id, 'child decision');
+    engine.setConclusion(p.id, null);
+    expect(engine.getThread(p.id)).toMatchObject({ status: 'resolved', noConclusion: true });
+    engine.followUp(c.id, 'one more thing');
+    expect(engine.getThread(p.id)).toMatchObject({ status: 'awaiting', conclusion: null, noConclusion: false });
+    await engine.whenIdle();
+  });
+
+  it('walks a deeper chain for both a new child and a follow-up', async () => {
+    const { engine } = setup(script);
+    const p = await answered(engine);
+    const c = await answered(engine, p.id);
+    const g = await answered(engine, c.id);
+    engine.setConclusion(g.id, 'g');
+    engine.setConclusion(c.id, 'c');
+    engine.setConclusion(p.id, 'p');
+    engine.addDraft('unit-1', anchor, 'great-grandchild', g.id);
+    for (const id of [g.id, c.id, p.id]) {
+      expect(engine.getThread(id)).toMatchObject({ status: 'awaiting', conclusion: null, noConclusion: false });
+    }
+  });
+
+  it('a follow-up on a resolved grandchild reopens every resolved ancestor', async () => {
+    const { engine } = setup(script);
+    const p = await answered(engine);
+    const c = await answered(engine, p.id);
+    const g = await answered(engine, c.id);
+    engine.setConclusion(g.id, 'g');
+    engine.setConclusion(c.id, 'c');
+    engine.setConclusion(p.id, 'p');
+    engine.followUp(g.id, 'more?');
+    expect(engine.getThread(c.id)).toMatchObject({ status: 'awaiting', conclusion: null });
+    expect(engine.getThread(p.id)).toMatchObject({ status: 'awaiting', conclusion: null });
+    await engine.whenIdle();
+  });
+
+  it('setConclusion rejects drafts and parents with unresolved children', async () => {
+    const { engine } = setup(script);
+    const d = engine.addDraft('unit-1', anchor, 'draft');
+    expect(() => engine.setConclusion(d.id, 'x')).toThrow(ConflictError);
+    engine.deleteDraft(d.id);
+    const p = await answered(engine);
+    await answered(engine, p.id);
+    expect(() => engine.setConclusion(p.id, 'x')).toThrow(ConflictError);
+  });
+
+  it('a conclusion run that finishes after a child was added leaves the parent awaiting', async () => {
+    const gate = deferred();
+    const { engine } = setup(async (req, n) => {
+      if (req.fork) return answer(`fork-${n}`);
+      await gate.promise;
+      return answer(req.parentSessionId, 'Too early.');
+    });
+    const p = await answered(engine);
+    const resolving = engine.resolve(p.id);
+    await new Promise((r) => setTimeout(r, 10));
+    engine.addDraft('unit-1', anchor, 'late child', p.id);
+    gate.resolve();
+    await resolving;
+    expect(engine.getThread(p.id)).toMatchObject({ status: 'awaiting', conclusion: null });
+  });
+});

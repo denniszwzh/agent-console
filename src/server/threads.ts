@@ -155,6 +155,8 @@ export class ThreadEngine {
     };
     unit.threads.push(thread);
     this.threadUnit.set(thread.id, unitId);
+    // The parent gains a child: it and every resolved ancestor must be concluded again.
+    this.reopenChain(unit, parentThreadId ?? null);
     this.persist(unit);
     return thread;
   }
@@ -190,6 +192,7 @@ export class ThreadEngine {
     thread.conclusion = null;
     thread.noConclusion = false;
     delete thread.error;
+    this.reopenChain(unit, thread.parentThreadId);
     this.persist(unit);
     this.enqueue(threadId, () => this.runAnswer(threadId, text, false));
   }
@@ -198,6 +201,7 @@ export class ThreadEngine {
     const { unit, thread } = this.locate(threadId);
     this.assertOpen(unit);
     if (thread.status !== 'error') throw new ConflictError('only threads in error can be retried');
+    this.reopenChain(unit, thread.parentThreadId);
     const lastMsg = thread.messages[thread.messages.length - 1];
     if (lastMsg?.role === 'assistant' && thread.sessionId && !this.answerFailed.has(threadId)) {
       // The failure happened in the conclusion run: re-run it.
@@ -223,9 +227,7 @@ export class ThreadEngine {
     this.assertOpen(unit);
     if (!thread.sessionId) throw new ConflictError('thread has no session yet');
     if (thread.status === 'draft' || thread.status === 'answering') throw new ConflictError('thread is busy');
-    if (unit.threads.some((t) => t.parentThreadId === threadId && t.status !== 'resolved')) {
-      throw new ConflictError('child threads must be resolved first');
-    }
+    if (this.hasOpenChildren(unit, threadId)) throw new ConflictError('child threads must be resolved first');
   }
 
   async resolve(threadId: string): Promise<void> {
@@ -248,6 +250,8 @@ export class ThreadEngine {
     const { unit, thread } = this.locate(threadId);
     this.assertOpen(unit);
     if (thread.status === 'answering') throw new ConflictError('thread is busy');
+    if (thread.status === 'draft') throw new ConflictError('draft threads cannot be concluded');
+    if (this.hasOpenChildren(unit, threadId)) throw new ConflictError('child threads must be resolved first');
     thread.conclusion = conclusion;
     thread.noConclusion = conclusion === null;
     thread.status = 'resolved';
@@ -256,6 +260,30 @@ export class ThreadEngine {
   }
 
   // ---- internals -----------------------------------------------------------
+
+  private hasOpenChildren(unit: ReviewUnit, threadId: string): boolean {
+    return unit.threads.some((t) => t.parentThreadId === threadId && t.status !== 'resolved');
+  }
+
+  /**
+   * Walks from `threadId` up to the root and sends every resolved thread back to `awaiting`,
+   * so a conclusion is never kept while a descendant is still being discussed.
+   */
+  private reopenChain(unit: ReviewUnit, threadId: string | null): void {
+    const seen = new Set<string>();
+    let id = threadId;
+    while (id && !seen.has(id)) {
+      seen.add(id);
+      const t = unit.threads.find((x) => x.id === id);
+      if (!t) return;
+      if (t.status === 'resolved') {
+        t.status = 'awaiting';
+        t.conclusion = null;
+        t.noConclusion = false;
+      }
+      id = t.parentThreadId;
+    }
+  }
 
   private userMessage(content: string): Message {
     return { id: randomUUID(), role: 'user', content, createdAt: new Date().toISOString() };
@@ -332,10 +360,10 @@ export class ThreadEngine {
   }
 
   /** Status-changing mutation; skipped for expired threads and non-open units. */
-  private mutateStatus(threadId: string, fn: (t: Thread) => void): void {
+  private mutateStatus(threadId: string, fn: (t: Thread, u: ReviewUnit) => void): void {
     this.mutate(threadId, (t, u) => {
       if (t.status === 'expired' || u.status !== 'open') return;
-      fn(t);
+      fn(t, u);
     });
   }
 
@@ -434,7 +462,14 @@ export class ThreadEngine {
       } else if (ev.type === 'done') {
         finished = true;
         const first = ev.finalText.trim().split(/\r?\n/)[0] ?? '';
-        this.mutateStatus(threadId, (t) => {
+        this.mutateStatus(threadId, (t, u) => {
+          // A child was added while the conclusion ran: the conclusion is already outdated.
+          if (this.hasOpenChildren(u, threadId)) {
+            t.status = 'awaiting';
+            t.conclusion = null;
+            t.noConclusion = false;
+            return;
+          }
           t.conclusion = first;
           t.noConclusion = false;
           t.status = 'resolved';
