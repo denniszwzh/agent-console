@@ -8,12 +8,68 @@ const STDERR_TAIL_CHARS = 2000;
 const QUEUE_TIMEOUT_MS = 10_000;
 
 /**
- * `-s read-only` must sit on `exec`, before fork/resume: the sub-subcommands reject the flag.
- * The prompt is read from stdin (`-`), never put in argv. `resume` reuses the parent's thread id.
+ * Flags that keep the user's own extensions out of a read-only fork (verified against codex-cli 0.167.0,
+ * see docs/codex-cli-notes.md): no plugins (and their MCP servers), no ChatGPT apps connectors, no hooks.
+ * `-c mcp_servers={}` does NOT work (it merges into the user's table), so each configured MCP server is
+ * disabled by name instead.
  */
-export function buildCodexArgs(req: RunRequest): string[] {
+const ISOLATION_ARGS = ['--disable', 'plugins', '--disable', 'apps', '-c', 'features.hooks=false'];
+
+/** A `-c` dotted path cannot quote keys, so only bare TOML keys can be addressed. */
+const BARE_KEY = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * `-s read-only` (and the other exec options) must sit on `exec`, before fork/resume: the
+ * sub-subcommands reject `-s`. The prompt is read from stdin (`-`), never put in argv. `resume`
+ * reuses the parent's thread id.
+ */
+export function buildCodexArgs(req: RunRequest, mcpServers: string[] = []): string[] {
   if (!isSafeId(req.parentSessionId)) throw new Error('invalid session id');
-  return ['exec', '-s', 'read-only', '--json', req.fork ? 'fork' : 'resume', req.parentSessionId, '-'];
+  const mcpOff: string[] = [];
+  for (const name of mcpServers) {
+    if (!BARE_KEY.test(name)) {
+      throw new Error(`Codex MCP server ${JSON.stringify(name)} cannot be disabled for a read-only fork; rename it to letters, digits, _ or -`);
+    }
+    mcpOff.push('-c', `mcp_servers.${name}.enabled=false`);
+  }
+  return ['exec', '-s', 'read-only', ...ISOLATION_ARGS, ...mcpOff, '--json', req.fork ? 'fork' : 'resume', req.parentSessionId, '-'];
+}
+
+const MCP_LIST_TIMEOUT_MS = 15_000;
+
+/** Names of the MCP servers configured for Codex (user config; plugin servers are off via --disable plugins). */
+export function listCodexMcpServers(opts: { bin?: string; binArgs?: string[] } = {}): Promise<string[]> {
+  const bin = opts.bin ?? 'codex';
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, [...(opts.binArgs ?? []), 'mcp', 'list', '--json', '--disable', 'plugins'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, AGENT_CONSOLE_FORK: '1' },
+      windowsHide: true,
+    });
+    let out = '';
+    let err = '';
+    child.stdout.setEncoding('utf8').on('data', (d: string) => (out += d));
+    child.stderr.setEncoding('utf8').on('data', (d: string) => (err = (err + d).slice(-STDERR_TAIL_CHARS)));
+    const timer = setTimeout(() => {
+      killTree(child);
+      reject(new Error('codex mcp list timed out'));
+    }, MCP_LIST_TIMEOUT_MS);
+    child.on('error', (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error(`codex mcp list exited with code ${code}. ${err.trim()}`.trim()));
+      try {
+        const list: unknown = JSON.parse(out);
+        if (!Array.isArray(list)) throw new Error('not a JSON array');
+        resolve(list.map((x) => (x as { name?: unknown })?.name).filter((n): n is string => typeof n === 'string'));
+      } catch (e) {
+        reject(new Error(`unexpected codex mcp list output: ${(e as Error).message}`));
+      }
+    });
+  });
 }
 
 type Json = Record<string, unknown>;
@@ -69,6 +125,8 @@ export interface CodexAdapterOptions {
   bin?: string;
   /** Arguments placed before the Codex arguments (lets tests run a fake CLI through node). */
   binArgs?: string[];
+  /** Lists the configured MCP servers to disable in each run; defaults to `codex mcp list --json`. */
+  listMcpServers?: () => Promise<string[]>;
 }
 
 export function createCodexAdapter(opts: CodexAdapterOptions = {}): AgentAdapter {
@@ -76,9 +134,21 @@ export function createCodexAdapter(opts: CodexAdapterOptions = {}): AgentAdapter
   return {
     kind: 'codex',
     async *run(req, signal) {
+      if (!isSafeId(req.parentSessionId)) {
+        yield { type: 'error', message: 'invalid session id' };
+        return;
+      }
+      // Fail closed: a fork must never run with the user's MCP servers attached.
+      let servers: string[];
+      try {
+        servers = await (opts.listMcpServers ?? (() => listCodexMcpServers({ bin, binArgs: opts.binArgs })))();
+      } catch (e) {
+        yield { type: 'error', message: `Could not list Codex MCP servers to disable them: ${(e as Error).message}` };
+        return;
+      }
       let args: string[];
       try {
-        args = [...(opts.binArgs ?? []), ...buildCodexArgs(req)];
+        args = [...(opts.binArgs ?? []), ...buildCodexArgs(req, servers)];
       } catch (e) {
         yield { type: 'error', message: (e as Error).message };
         return;

@@ -265,3 +265,56 @@ fall back to the clipboard/paste approach (or be labelled best-effort) for Codex
 - Successful `apply_patch` records (only the rejected form was observed; writes were forbidden).
 - `codex queue` into a live TUI.
 - Prompt via stdin plus `fork`/`resume`: works with `-` as the prompt (verified for fork). The fork prompt is mandatory ("fork requires a prompt" per `--help`).
+
+## Fork isolation flags (final review item 6, 2026-11-15, codex-cli 0.167.0)
+
+Question: do read-only forks load the user's MCP servers, plugins and hooks, and which flags turn them off?
+Setup: scratch git repo under `%TEMP%`, parent made with `echo "Reply with exactly: hi" | codex exec -s read-only --json -`.
+Every fork/resume below used `codex exec -s read-only --json [flags] fork|resume <id> -` with a one-line prompt on stdin
+("Without calling any tool: list the names of the MCP servers whose tools you can call ... or NONE").
+MCP start-up was observed directly: a Node watcher polled `Win32_Process` for new `node_repl.exe` / `cua-repl` (`node.exe`)
+processes while Codex ran. The user config has two MCP servers (`node_repl`, `notion`), plugin-provided servers (`cua_repl`,
+`codex_app`) and a trusted `Interrupt` hook.
+
+| Run | Extra flags | New MCP processes | Model's answer |
+| --- | --- | --- | --- |
+| control | none | `node_repl.exe` x2, `node.exe` (cua-repl) | codex_apps tools (gmail, notion, ...), node_repl |
+| D | `-c mcp_servers={}` | `node_repl.exe` x2, `node.exe` | same as control |
+| A | `--disable plugins --disable apps -c features.hooks=false` | `node_repl.exe` | node_repl |
+| B | `--ignore-user-config` | none | codex_apps |
+| C | `--disable plugins --disable apps -c features.hooks=false -c mcp_servers.node_repl.enabled=false -c mcp_servers.notion.enabled=false` | none | NONE |
+| F (resume of C's thread) | same as C | none | NONE |
+
+Also `codex mcp list --json [-c ...]` shows the effective table: `-c mcp_servers={}` leaves all four servers enabled
+(the override merges into the user's table; it does not replace it), `--disable plugins` removes `cua_repl`/`codex_app`,
+and `-c mcp_servers.<name>.enabled=false` marks that server disabled. A quoted key (`-c 'mcp_servers."node_repl".enabled=false'`)
+makes Codex fail with `Error: failed to load bootstrap configuration`, so only bare keys (`[A-Za-z0-9_-]+`) can be addressed.
+
+Hooks (`-c features.hooks=false`), control vs test, both with a Stop hook passed as
+`-c 'hooks.Stop=[{hooks=[{type="command",command="node <scratch>/hook-marker.mjs <marker>"}]}]' --dangerously-bypass-hook-trust`
+(the bypass flag only for this experiment, so that the probe hook could fire without a persisted trust hash):
+- E1 (no `features.hooks=false`): the marker file was written with `Stop`. So hooks do run in `exec fork`.
+- E2 (same plus `-c features.hooks=false`): no marker file; the fork still answered `ok`, exit 0.
+
+Why not `--ignore-user-config`: it does hide the user's MCP servers and plugins, but the fork then also loses the user's
+model/provider and settings: run B's rollout `turn_context` had `model: "gpt-6.1-sol"` and no reasoning effort, while the parent
+(and run C) had `model: "chatgpt-web/gpt-6-sol"`, `effort: "high"`; `[windows] sandbox`, `notify` and the custom `openai_base_url`
+are dropped too. A fork must answer with the same model as the main session, so this flag was NOT adopted.
+
+Read-only still holds with the adopted flags (run G, fork asked to create `hello.txt` with apply_patch): the fork replied
+"apply_patch was blocked by the read-only sandbox; hello.txt was not created", and `git status --porcelain` showed no `hello.txt`.
+
+Adopted in `buildCodexArgs` (exact-argv tests in `tests/agents/codex.test.ts`):
+
+```
+codex exec -s read-only --disable plugins --disable apps -c features.hooks=false
+           [-c mcp_servers.<name>.enabled=false ...] --json fork|resume <id> -
+```
+
+The server names come from `codex mcp list --json --disable plugins` (about 1.3 s), run before every fork/resume so newly
+configured servers are covered. The adapter fails closed: if the list cannot be read, or a name is not a bare key, the run
+ends with an error and Codex is not started. The compiled adapter was run once against the real CLI in the scratch repo
+(fork of the parent above): events `session`, `text: "NONE"`, `done: "NONE"`.
+
+Not covered: ChatGPT apps connectors other than via `--disable apps` (verified only through the model's tool list), and
+plugin-bundled skills (no observable side effect; `--disable plugins` removes them from the effective config).

@@ -3,7 +3,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentEvent, RunRequest } from '../../src/agents/adapter.js';
-import { buildCodexArgs, codexInstruction, createCodexAdapter, createCodexQueueRunner, parseCodexStream } from '../../src/agents/codex.js';
+import {
+  buildCodexArgs,
+  codexInstruction,
+  createCodexAdapter,
+  createCodexQueueRunner,
+  listCodexMcpServers,
+  parseCodexStream,
+} from '../../src/agents/codex.js';
 
 const req: RunRequest = { parentSessionId: 'parent-1', fork: true, prompt: 'SECRET PROMPT "q" \\ x', cwd: '.' };
 
@@ -19,12 +26,27 @@ const fixtureLines = (name: string) =>
   fs.readFileSync(path.join(import.meta.dirname, '..', 'fixtures', name), 'utf8').split('\n').filter(Boolean);
 
 describe('buildCodexArgs', () => {
-  it('forks with -s read-only placed before the subcommand', () => {
-    expect(buildCodexArgs({ ...req, fork: true })).toEqual(['exec', '-s', 'read-only', '--json', 'fork', 'parent-1', '-']);
+  const ISOLATION = ['--disable', 'plugins', '--disable', 'apps', '-c', 'features.hooks=false'];
+
+  it('forks with -s read-only and the isolation flags placed before the subcommand', () => {
+    expect(buildCodexArgs({ ...req, fork: true })).toEqual(['exec', '-s', 'read-only', ...ISOLATION, '--json', 'fork', 'parent-1', '-']);
   });
 
-  it('resumes with -s read-only placed before the subcommand', () => {
-    expect(buildCodexArgs({ ...req, fork: false })).toEqual(['exec', '-s', 'read-only', '--json', 'resume', 'parent-1', '-']);
+  it('resumes with -s read-only and the isolation flags placed before the subcommand', () => {
+    expect(buildCodexArgs({ ...req, fork: false })).toEqual(['exec', '-s', 'read-only', ...ISOLATION, '--json', 'resume', 'parent-1', '-']);
+  });
+
+  it('disables every configured MCP server by name', () => {
+    expect(buildCodexArgs(req, ['node_repl', 'my-notion2'])).toEqual([
+      'exec', '-s', 'read-only', ...ISOLATION,
+      '-c', 'mcp_servers.node_repl.enabled=false',
+      '-c', 'mcp_servers.my-notion2.enabled=false',
+      '--json', 'fork', 'parent-1', '-',
+    ]);
+  });
+
+  it('refuses MCP server names that cannot be addressed as a bare -c key', () => {
+    for (const bad of ['a.b', 'with space', '"q"', '', 'x=y']) expect(() => buildCodexArgs(req, [bad])).toThrow(/MCP server/);
   });
 
   it('never puts the prompt in argv', () => {
@@ -119,10 +141,10 @@ describe('createCodexAdapter.run', () => {
   });
   afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
 
-  function fake(body: string) {
+  function fake(body: string, servers: string[] = []) {
     const file = path.join(home, 'fake-codex.mjs');
     fs.writeFileSync(file, body);
-    return createCodexAdapter({ bin: process.execPath, binArgs: [file] });
+    return createCodexAdapter({ bin: process.execPath, binArgs: [file], listMcpServers: async () => servers });
   }
 
   it('is a codex adapter', () => {
@@ -147,7 +169,35 @@ describe('createCodexAdapter.run', () => {
     const got = JSON.parse((ev[2] as { finalText: string }).finalText);
     expect(got.stdin).toBe(prompt);
     expect(got.fork).toBe('1');
-    expect(got.argv).toEqual(['exec', '-s', 'read-only', '--json', 'fork', 'p', '-']);
+    expect(got.argv).toEqual(['exec', '-s', 'read-only', '--disable', 'plugins', '--disable', 'apps', '-c', 'features.hooks=false', '--json', 'fork', 'p', '-']);
+  });
+
+  it('disables the listed MCP servers in the spawned argv', async () => {
+    const adapter = fake(
+      `console.log(JSON.stringify({ type: 'thread.started', thread_id: 'i' }));
+       console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify(process.argv.slice(2)) } }));
+       console.log(JSON.stringify({ type: 'turn.completed' }));`,
+      ['node_repl'],
+    );
+    const ev = await collect(adapter.run({ parentSessionId: 'p', fork: false, prompt: 'x', cwd: home }));
+    const argv = JSON.parse((ev[ev.length - 1] as { finalText: string }).finalText) as string[];
+    expect(argv.join(' ')).toContain('-c mcp_servers.node_repl.enabled=false --json resume p -');
+  });
+
+  it('fails closed (no exec spawned) when the MCP servers cannot be listed', async () => {
+    const marker = path.join(home, 'spawned.txt');
+    const file = path.join(home, 'fake-codex.mjs');
+    fs.writeFileSync(file, `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'x');`);
+    const adapter = createCodexAdapter({
+      bin: process.execPath,
+      binArgs: [file],
+      listMcpServers: async () => {
+        throw new Error('boom');
+      },
+    });
+    const ev = await collect(adapter.run({ parentSessionId: 'p', fork: true, prompt: 'x', cwd: home }));
+    expect(ev).toEqual([{ type: 'error', message: 'Could not list Codex MCP servers to disable them: boom' }]);
+    expect(fs.existsSync(marker)).toBe(false);
   });
 
   it('ignores stderr noise when the run succeeds', async () => {
@@ -202,6 +252,34 @@ describe('createCodexAdapter.run', () => {
     setTimeout(() => ctl.abort(), 300);
     const ev = await collect(adapter.run({ parentSessionId: 'p', fork: true, prompt: 'x', cwd: home }, ctl.signal));
     expect(ev[ev.length - 1]).toEqual({ type: 'error', message: 'aborted' });
+  });
+});
+
+describe('listCodexMcpServers', () => {
+  let home: string;
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-codex-mcp-'));
+  });
+  afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
+
+  const fakeBin = (body: string) => {
+    const file = path.join(home, 'fake-codex.mjs');
+    fs.writeFileSync(file, body);
+    return { bin: process.execPath, binArgs: [file] };
+  };
+
+  it('runs `mcp list --json --disable plugins` and returns the server names', async () => {
+    const o = fakeBin(`
+      const argv = process.argv.slice(2);
+      if (argv.join(' ') !== 'mcp list --json --disable plugins') process.exit(9);
+      console.log(JSON.stringify([{ name: 'node_repl', enabled: true }, { name: 'notion', enabled: false }]));`);
+    expect(await listCodexMcpServers(o)).toEqual(['node_repl', 'notion']);
+  });
+
+  it('rejects on a non-zero exit or output that is not a JSON array', async () => {
+    await expect(listCodexMcpServers(fakeBin('process.exit(2);'))).rejects.toThrow(/code 2/);
+    await expect(listCodexMcpServers(fakeBin('console.log("Error: failed");'))).rejects.toThrow();
+    await expect(listCodexMcpServers(fakeBin('console.log("{}");'))).rejects.toThrow();
   });
 });
 
