@@ -20,6 +20,9 @@ export function buildClaudeArgs(req: RunRequest, guardSettingsPath: string): str
     '--strict-mcp-config',
     '--permission-mode', 'default',
     '--settings', guardSettingsPath,
+    // Skip user-level settings so the user's own hooks/plugins (e.g. SessionStart hooks that write
+    // files into the cwd) never run inside a read-only fork. The --settings guard above still applies.
+    '--setting-sources', 'project,local',
   ];
 }
 

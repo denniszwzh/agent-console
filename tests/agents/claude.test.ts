@@ -41,12 +41,18 @@ describe('buildClaudeArgs', () => {
     expect(a[a.indexOf('--permission-mode') + 1]).toBe('default');
   });
 
+  it('keeps user-level hooks and plugins out of forks', () => {
+    const a = buildClaudeArgs(req, 'g.json');
+    expect(a[a.indexOf('--setting-sources') + 1]).toBe('project,local');
+  });
+
   it('matches the documented argv shape', () => {
     expect(buildClaudeArgs(req, 'g.json')).toEqual([
       '-p', '--resume', 'parent-1', '--fork-session', '--output-format', 'stream-json', '--verbose',
       '--tools', 'Read,Grep,Glob,Bash,PowerShell',
       '--disallowedTools', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
       '--strict-mcp-config', '--permission-mode', 'default', '--settings', 'g.json',
+      '--setting-sources', 'project,local',
     ]);
   });
 });
