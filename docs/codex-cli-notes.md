@@ -146,7 +146,7 @@ timeout = 30
 ```
 
 The same table can be passed per invocation with `-c`: `-c 'hooks.Stop=[{hooks=[{type="command",command="node C:/path/hook.js"}]}]'`
-(the `-c` form parsed without error; whether the hook then runs depends on trust, below).
+(the `-c` form parsed without error; in my run the hooks did not fire; the cause, trust or the `-c` form not being honoured by exec, is inferred, see "Hook trust" below).
 
 Events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`, `PostCompact`,
 `PreModelRequest`, `PostModelRequest`, `SubagentStart`, `SubagentStop`, `Stop`, `Interrupt`, `SessionEnd`.
@@ -166,7 +166,7 @@ a change to `~/.codex/config.toml` (forbidden), so no hook input could be captur
 
 Consequences for the adapter / installer:
 - A Codex hook for the panel needs the user to trust it once (`/hooks` in the TUI) after the installer writes it. The installer docs must say so, and the status check
-  should treat "hook installed but untrusted" as not working (it will silently never fire).
+  should treat "hook installed but untrusted" as not working (per the docs it should silently never fire; not confirmed by a control run).
 - Changing the hook command changes its hash, so it must be re-trusted. Keep the command string stable (point at a fixed script and put logic in the script).
 - Hooks should NOT be needed for the forked question threads (they run with `AGENT_CONSOLE_FORK=1`); keep the same fork guard as Claude if hooks are active.
 
@@ -198,7 +198,7 @@ transcript format "is not a stable interface"; `transcript_path` can be null, so
 - `PreToolUse`: plain stdout ignored; `permissionDecision: "deny"` (or `decision:"block"`, or exit 2) blocks; `allow` + `updatedInput` rewrites.
 - Hooks can be `async: true` (background, cannot block).
 
-My test hook printed `The secret word is PINEAPPLE...` for UserPromptSubmit; because hooks never ran (trust) the model did not see it
+My test hook printed `The secret word is PINEAPPLE...` for UserPromptSubmit; the hooks were observed not to fire (cause inferred: trust, or the `-c` form not honoured in exec), so the model most likely did not see it
 (it answered the secret word as "x", taken from my prompt), so the injection behaviour itself is NOT verified live.
 
 ## Rollout / session files (VERIFIED)
