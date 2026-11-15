@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import { isSafeId } from '../shared/ids.js';
 import type { AgentAdapter, AgentEvent, RunRequest } from './adapter.js';
+import { killTree } from './kill.js';
 
 const STDERR_TAIL_CHARS = 2000;
 const QUEUE_TIMEOUT_MS = 10_000;
@@ -109,7 +110,7 @@ export function createCodexAdapter(opts: CodexAdapterOptions = {}): AgentAdapter
       let aborted = signal?.aborted ?? false;
       const onAbort = () => {
         aborted = true;
-        child.kill();
+        killTree(child);
       };
       if (signal) {
         if (signal.aborted) onAbort();
@@ -140,7 +141,7 @@ export function createCodexAdapter(opts: CodexAdapterOptions = {}): AgentAdapter
         }
       } finally {
         signal?.removeEventListener('abort', onAbort);
-        if (child.exitCode === null && child.signalCode === null) child.kill();
+        if (child.exitCode === null && child.signalCode === null) killTree(child);
       }
     },
   };
@@ -184,7 +185,7 @@ export function createCodexQueueRunner(opts: { bin?: string; binArgs?: string[];
         return;
       }
       timer = setTimeout(() => {
-        child.kill();
+        killTree(child);
         finish(false, 'timed out');
       }, opts.timeoutMs ?? QUEUE_TIMEOUT_MS);
       let stderr = '';

@@ -133,7 +133,7 @@ function setup(hardGate = false) {
   const store = new UnitStore();
   const bus = new EventBus();
   const engine = new ThreadEngine(store, bus, {}, 3, { gitStatus: async () => null });
-  const app = buildApp({ store, token: TOKEN, port: PORT, bus, engine, config: { port: PORT, concurrency: 3, hardGate } });
+  const app = buildApp({ store, token: TOKEN, port: PORT, bus, engine, config: { port: PORT, concurrency: 3, hardGate, runTimeoutMs: 600_000 } });
   return { store, app };
 }
 

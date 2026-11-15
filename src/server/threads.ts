@@ -18,6 +18,8 @@ export interface ThreadEngineOptions {
   gitStatus?: (cwd: string) => Promise<string | null>;
   /** Stat seam for change fingerprints; returns null when the file is missing. */
   statPath?: (absPath: string) => { mtimeMs: number; size: number } | null;
+  /** Upper bound for one fork run; defaults to 10 minutes. */
+  runTimeoutMs?: number;
 }
 
 function defaultGitStatus(cwd: string): Promise<string | null> {
@@ -76,6 +78,15 @@ function changedPaths(before: Fingerprints, after: Fingerprints): string[] {
 
 type Job = () => Promise<void>;
 
+const DEFAULT_RUN_TIMEOUT_MS = 600_000;
+/** Abort reasons for a fork run. */
+const TIMEOUT = Symbol('timeout');
+const EXPIRED = Symbol('expired');
+
+function formatMinutes(ms: number): string {
+  return String(Number((ms / 60_000).toFixed(2)));
+}
+
 export class ThreadEngine {
   private forkSessions = new Set<string>();
   private threadUnit = new Map<string, string>();
@@ -85,6 +96,9 @@ export class ThreadEngine {
   private inflight = new Set<Promise<void>>();
   /** Threads whose last failure happened in an answer run (not the conclusion run). */
   private answerFailed = new Set<string>();
+  /** threadId -> abort controller of its in-flight run. */
+  private runs = new Map<string, AbortController>();
+  private runTimeoutMs: number;
 
   constructor(
     private store: UnitStore,
@@ -95,6 +109,8 @@ export class ThreadEngine {
   ) {
     this.concurrency =
       typeof concurrency === 'number' && Number.isFinite(concurrency) ? Math.max(1, Math.floor(concurrency)) : 3;
+    const t = opts.runTimeoutMs;
+    this.runTimeoutMs = typeof t === 'number' && Number.isFinite(t) && t > 0 ? t : DEFAULT_RUN_TIMEOUT_MS;
     for (const s of store.listSessions()) {
       for (const u of store.listBySession(s.sessionId)) {
         let dirty = false;
@@ -115,6 +131,13 @@ export class ThreadEngine {
 
   isForkSession(sessionId: string): boolean {
     return this.forkSessions.has(sessionId);
+  }
+
+  /** Aborts the in-flight runs of a unit's threads (called when the unit expires). */
+  abortUnitRuns(unitId: string): void {
+    for (const [threadId, ctl] of this.runs) {
+      if (this.threadUnit.get(threadId) === unitId) ctl.abort(EXPIRED);
+    }
   }
 
   /** Resolves once every queued or running branch has finished. */
@@ -377,16 +400,42 @@ export class ThreadEngine {
   /** Runs the adapter bracketed by git-status checks, feeding events to the handler. */
   private async runAgent(threadId: string, prompt: string, fork: boolean, onEvent: (e: AgentEvent) => void): Promise<void> {
     const { unit, thread } = this.locate(threadId);
+    // The unit may have been superseded while this job waited for a slot.
+    if (unit.status !== 'open' || thread.status === 'expired') return;
     const adapter = this.adapters[unit.agent];
     if (!adapter) {
       this.fail(threadId, `No adapter for agent '${unit.agent}' yet`);
       return;
     }
     const parentSessionId = fork ? thread.forkFromSessionId : (thread.sessionId as string);
+    const ctl = new AbortController();
+    this.runs.set(threadId, ctl);
+    const timer = setTimeout(() => ctl.abort(TIMEOUT), this.runTimeoutMs);
+    // Settles only on abort, so a hung adapter (one that ignores its signal) cannot hold the slot.
+    const aborted = new Promise<never>((_, reject) => {
+      ctl.signal.addEventListener('abort', () => reject(ctl.signal.reason), { once: true });
+    });
+    aborted.catch(() => {});
     const before = await this.snapshot(unit.cwd);
     try {
-      for await (const ev of adapter.run({ parentSessionId, fork, prompt, cwd: unit.cwd })) onEvent(ev);
+      const it = adapter.run({ parentSessionId, fork, prompt, cwd: unit.cwd }, ctl.signal)[Symbol.asyncIterator]();
+      try {
+        for (;;) {
+          const next = it.next();
+          next.catch(() => {});
+          const r = await Promise.race([next, aborted]);
+          if (r.done) break;
+          onEvent(r.value);
+        }
+      } catch (e) {
+        if (!ctl.signal.aborted) throw e;
+        // Do not wait for the generator: a hung one would never finish its cleanup.
+        it.return?.(undefined)?.catch(() => {});
+        if (ctl.signal.reason === TIMEOUT) throw new Error(`Timed out after ${formatMinutes(this.runTimeoutMs)} min`);
+      }
     } finally {
+      clearTimeout(timer);
+      if (this.runs.get(threadId) === ctl) this.runs.delete(threadId);
       const after = await this.snapshot(unit.cwd);
       if (before !== null && after !== null) {
         const paths = changedPaths(before, after);
@@ -424,7 +473,8 @@ export class ThreadEngine {
         m.blocks = splitBlocks(content, 'markdown');
       });
     };
-    this.answerFailed.delete(threadId);
+    // Any way this run fails (error event, throw, timeout) counts as an answer failure.
+    this.answerFailed.add(threadId);
     await this.runAgent(threadId, prompt, fork, (ev) => {
       if (finished) return;
       if (ev.type === 'session') {
@@ -437,18 +487,17 @@ export class ThreadEngine {
         setContent(texts.join('\n\n'));
       } else if (ev.type === 'done') {
         finished = true;
+        this.answerFailed.delete(threadId);
         setContent(ev.finalText);
         this.mutateStatus(threadId, (t) => {
           t.status = 'awaiting';
         });
       } else if (ev.type === 'error') {
         finished = true;
-        this.answerFailed.add(threadId);
         this.fail(threadId, ev.message);
       }
     });
     if (!finished && this.getThread(threadId).status === 'answering') {
-      this.answerFailed.add(threadId);
       this.fail(threadId, 'Agent ended without a final answer');
     }
   }

@@ -650,3 +650,124 @@ describe('ThreadEngine ancestor reopening (final review item 1)', () => {
     expect(engine.getThread(p.id)).toMatchObject({ status: 'awaiting', conclusion: null });
   });
 });
+
+describe('ThreadEngine run timeout and expiry (final review item 3 / R-F2)', () => {
+  /** Never yields and ignores its signal (a hung CLI): only the engine can free the slot. */
+  class HangingAdapter implements AgentAdapter {
+    kind = 'claude' as const;
+    signals: (AbortSignal | undefined)[] = [];
+    async *run(_req: RunRequest, signal?: AbortSignal): AsyncIterable<AgentEvent> {
+      this.signals.push(signal);
+      await new Promise(() => {});
+    }
+  }
+
+  it('times out a hung run, marks the thread error and frees the slot', async () => {
+    const store = new UnitStore();
+    makeUnit(store);
+    const hanging = new HangingAdapter();
+    let n = 0;
+    const adapter: AgentAdapter = {
+      kind: 'claude',
+      run: (req, signal) => (n++ === 0 ? hanging.run(req, signal) : new FakeAdapter(() => answer('fork-2')).run(req)),
+    };
+    const engine = new ThreadEngine(store, new EventBus(), { claude: adapter }, 1, { gitStatus: async () => null, runTimeoutMs: 50 });
+    const a = engine.addDraft('unit-1', anchor, 'hangs');
+    const b = engine.addDraft('unit-1', anchor, 'queued behind it');
+    engine.sendDrafts('unit-1');
+    await engine.whenIdle();
+    expect(engine.getThread(a.id).status).toBe('error');
+    expect(engine.getThread(a.id).error).toMatch(/^Timed out after [\d.]+ min$/);
+    expect(hanging.signals[0]?.aborted).toBe(true);
+    expect(engine.getThread(b.id).status).toBe('awaiting');
+  });
+
+  it('formats the default timeout in whole minutes', async () => {
+    const store = new UnitStore();
+    makeUnit(store);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const engine = new ThreadEngine(store, new EventBus(), { claude: new HangingAdapter() }, 1, { gitStatus: async () => null });
+      const t = engine.addDraft('unit-1', anchor, 'q');
+      engine.sendDrafts('unit-1');
+      await vi.advanceTimersByTimeAsync(600_000);
+      await engine.whenIdle();
+      expect(engine.getThread(t.id).error).toBe('Timed out after 10 min');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a timed-out answer retried resends the question (not a conclusion run)', async () => {
+    const store = new UnitStore();
+    makeUnit(store);
+    const requests: RunRequest[] = [];
+    const adapter: AgentAdapter = {
+      kind: 'claude',
+      async *run(req) {
+        requests.push(req);
+        if (requests.length === 1) {
+          yield { type: 'session', sessionId: 'f1' };
+          yield { type: 'text', text: 'partial' };
+          await new Promise(() => {});
+        }
+        yield* answer('f1');
+      },
+    };
+    const engine = new ThreadEngine(store, new EventBus(), { claude: adapter }, 1, { gitStatus: async () => null, runTimeoutMs: 50 });
+    const t = engine.addDraft('unit-1', anchor, 'the question');
+    engine.sendDrafts('unit-1');
+    await engine.whenIdle();
+    expect(engine.getThread(t.id).status).toBe('error');
+    engine.retry(t.id);
+    await engine.whenIdle();
+    expect(requests[1].prompt).toContain('the question');
+    expect(engine.getThread(t.id).status).toBe('awaiting');
+  });
+
+  it('a new Stop for the session expires the unit and aborts its in-flight run', async () => {
+    const store = new UnitStore();
+    const bus = new EventBus();
+    makeUnit(store);
+    const hanging = new HangingAdapter();
+    const engine = new ThreadEngine(store, bus, { claude: hanging }, 1, { gitStatus: async () => null });
+    const app = buildApp({ store, token: 't', port: 4317, bus, engine, config: { port: 4317, concurrency: 1, hardGate: false, runTimeoutMs: 600_000 } });
+    const t = engine.addDraft('unit-1', anchor, 'q');
+    engine.sendDrafts('unit-1');
+    await new Promise((r) => setTimeout(r, 20));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/hooks/claude/stop',
+      headers: { host: '127.0.0.1:4317', authorization: 'Bearer t' },
+      payload: { session_id: 'main-sess', cwd: home, last_assistant_message: 'next turn' },
+    });
+    expect(res.statusCode).toBe(200);
+    await engine.whenIdle(); // resolves only because the run was aborted
+    expect(hanging.signals[0]?.aborted).toBe(true);
+    expect(store.get('unit-1')!.threads.find((x) => x.id === t.id)!.status).toBe('expired');
+  });
+
+  it('a queued run of an expired unit never starts', async () => {
+    const store = new UnitStore();
+    const bus = new EventBus();
+    makeUnit(store);
+    const gate = deferred();
+    const adapter = new FakeAdapter(async () => {
+      await gate.promise;
+      return answer('f');
+    });
+    const engine = new ThreadEngine(store, bus, { claude: adapter }, 1, { gitStatus: async () => null });
+    engine.addDraft('unit-1', anchor, 'first');
+    engine.addDraft('unit-1', anchor, 'second');
+    engine.sendDrafts('unit-1');
+    await new Promise((r) => setTimeout(r, 10));
+    const u = store.get('unit-1')!;
+    u.status = 'stale';
+    for (const t of u.threads) t.status = 'expired';
+    store.save(u);
+    engine.abortUnitRuns('unit-1');
+    gate.resolve();
+    await engine.whenIdle();
+    expect(adapter.requests).toHaveLength(1);
+  });
+});

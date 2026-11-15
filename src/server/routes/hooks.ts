@@ -76,7 +76,10 @@ export function registerHookRoutes(
     }
     store.save(unit);
 
-    for (const prev of staled) bus.emit({ type: 'unit.updated', unitId: prev.id, sessionId });
+    for (const prev of staled) {
+      forks?.abortUnitRuns?.(prev.id);
+      bus.emit({ type: 'unit.updated', unitId: prev.id, sessionId });
+    }
     bus.emit({ type: 'unit.created', unitId: unit.id, sessionId });
     return { unitId: unit.id };
   };

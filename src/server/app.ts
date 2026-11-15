@@ -17,6 +17,8 @@ import type { Config } from '../shared/types.js';
 /** Implemented by the thread engine so ingestion can skip sessions it forked itself. */
 export interface ForkRegistry {
   isForkSession(sessionId: string): boolean;
+  /** Aborts in-flight fork runs of a unit whose threads just expired. */
+  abortUnitRuns?(unitId: string): void;
 }
 
 export interface AppDeps {

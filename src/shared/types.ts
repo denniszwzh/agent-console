@@ -80,4 +80,6 @@ export interface Config {
   port: number;
   concurrency: number;
   hardGate: boolean;
+  /** Upper bound for one fork run (answer or conclusion), in milliseconds. */
+  runTimeoutMs: number;
 }

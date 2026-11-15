@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe('readConfig', () => {
-  const defaults = { port: 4317, concurrency: 3, hardGate: false };
+  const defaults = { port: 4317, concurrency: 3, hardGate: false, runTimeoutMs: 600_000 };
 
   it('returns defaults when no config file exists', () => {
     expect(readConfig()).toEqual(defaults);

@@ -5,6 +5,7 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { dataDir } from '../server/paths.js';
 import type { AgentAdapter, AgentEvent, RunRequest } from './adapter.js';
+import { killTree } from './kill.js';
 
 const STDERR_TAIL_CHARS = 2000;
 
@@ -125,7 +126,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions = {}): AgentAdapt
       let aborted = signal?.aborted ?? false;
       const onAbort = () => {
         aborted = true;
-        child.kill();
+        killTree(child);
       };
       if (signal) {
         if (signal.aborted) onAbort();
@@ -147,7 +148,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions = {}): AgentAdapt
         }
       } finally {
         signal?.removeEventListener('abort', onAbort);
-        if (child.exitCode === null && child.signalCode === null) child.kill();
+        if (child.exitCode === null && child.signalCode === null) killTree(child);
       }
     },
   };

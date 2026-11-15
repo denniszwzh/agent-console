@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Config } from '../shared/types.js';
 
-const DEFAULT_CONFIG: Config = { port: 4317, concurrency: 3, hardGate: false };
+const DEFAULT_CONFIG: Config = { port: 4317, concurrency: 3, hardGate: false, runTimeoutMs: 600_000 };
 
 /** Data directory; AGENT_CONSOLE_HOME overrides the default ~/.agent-console. */
 export function dataDir(): string {
