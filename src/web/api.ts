@@ -1,17 +1,7 @@
-import type { AgentKind, Anchor, ReviewUnit, Source, Thread } from '../shared/types.js';
+import type { Anchor, ReviewUnit, ServerEvent, SessionSummary, Source, Thread } from '../shared/types.js';
 
-export interface SessionSummary {
-  sessionId: string;
-  agent: AgentKind;
-  cwd: string;
-  lastActivity: string;
-}
+export type { ServerEvent, SessionSummary };
 
-export interface ServerEvent {
-  type: 'unit.created' | 'unit.updated';
-  unitId: string;
-  sessionId: string;
-}
 
 export class ApiError extends Error {
   constructor(

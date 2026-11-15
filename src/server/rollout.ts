@@ -1,26 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { readJsonl, type JsonlEntry } from './jsonl.js';
 
-type Entry = Record<string, any>;
-
-function parseLines(file: string): Entry[] {
-  let raw: string;
-  try {
-    raw = readFileSync(file, 'utf8');
-  } catch {
-    return [];
-  }
-  const entries: Entry[] = [];
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const obj = JSON.parse(line);
-      if (obj && typeof obj === 'object') entries.push(obj);
-    } catch {
-      // skip malformed line
-    }
-  }
-  return entries;
-}
+type Entry = JsonlEntry;
 
 function isTaskStarted(e: Entry): boolean {
   return e.type === 'event_msg' && e.payload?.type === 'task_started';
@@ -47,7 +27,7 @@ function isRejection(output: unknown): boolean {
  */
 export function findChangedFilesCodex(rolloutPath: string): string[] {
   try {
-    const entries = parseLines(rolloutPath);
+    const entries = readJsonl(rolloutPath);
     let start = -1;
     for (let i = entries.length - 1; i >= 0; i--) {
       if (isTaskStarted(entries[i])) {

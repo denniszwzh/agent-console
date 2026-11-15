@@ -83,3 +83,18 @@ export interface Config {
   /** Upper bound for one fork run (answer or conclusion), in milliseconds. */
   runTimeoutMs: number;
 }
+
+/** One row of the session list (GET /api/sessions). */
+export interface SessionSummary {
+  sessionId: string;
+  agent: AgentKind;
+  cwd: string;
+  lastActivity: string;
+}
+
+/** Notification pushed over SSE (GET /api/events); clients refetch on receipt. */
+export interface ServerEvent {
+  type: 'unit.created' | 'unit.updated';
+  unitId: string;
+  sessionId: string;
+}

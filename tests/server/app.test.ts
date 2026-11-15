@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import http from 'node:http';
 import net from 'node:net';
 import { buildApp } from '../../src/server/app.js';
+import { EventBus } from '../../src/server/events.js';
 import { UnitStore } from '../../src/server/store.js';
 
 const TOKEN = 'secret-token';
@@ -141,7 +142,8 @@ async function freePort(): Promise<number> {
 describe('SSE', () => {
   it('streams bus events and unsubscribes on disconnect', async () => {
     const port = await freePort();
-    const app = buildApp({ store: new UnitStore(), token: TOKEN, port });
+    const bus = new EventBus();
+    const app = buildApp({ store: new UnitStore(), token: TOKEN, port, bus });
     await app.listen({ host: '127.0.0.1', port });
     try {
       const req = http.get({
@@ -150,7 +152,7 @@ describe('SSE', () => {
       });
       const res = await new Promise<http.IncomingMessage>((resolve) => req.on('response', resolve));
       expect(res.headers['content-type']).toContain('text/event-stream');
-      expect(app.bus.subscriberCount()).toBe(1);
+      expect(bus.subscriberCount()).toBe(1);
       const received = new Promise<string>((resolve) => {
         let buf = '';
         res.on('data', (c) => {
@@ -158,11 +160,11 @@ describe('SSE', () => {
           if (buf.includes('data: ')) resolve(buf);
         });
       });
-      app.bus.emit({ type: 'unit.created', unitId: 'u1', sessionId: 's1' });
+      bus.emit({ type: 'unit.created', unitId: 'u1', sessionId: 's1' });
       expect(await received).toContain('data: {"type":"unit.created","unitId":"u1","sessionId":"s1"}');
       req.destroy();
-      for (let i = 0; i < 50 && app.bus.subscriberCount() > 0; i++) await new Promise((r) => setTimeout(r, 20));
-      expect(app.bus.subscriberCount()).toBe(0);
+      for (let i = 0; i < 50 && bus.subscriberCount() > 0; i++) await new Promise((r) => setTimeout(r, 20));
+      expect(bus.subscriberCount()).toBe(0);
     } finally {
       await app.close();
     }

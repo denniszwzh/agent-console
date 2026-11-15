@@ -1,8 +1,4 @@
-export type ServerEvent = {
-  type: 'unit.created' | 'unit.updated';
-  unitId: string;
-  sessionId: string;
-};
+import type { ServerEvent } from '../shared/types.js';
 
 export class EventBus {
   private subscribers = new Set<(e: ServerEvent) => void>();

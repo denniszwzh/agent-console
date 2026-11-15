@@ -35,13 +35,6 @@ export interface AppDeps {
   webRoot?: string;
 }
 
-declare module 'fastify' {
-  interface FastifyInstance {
-    /** Event bus shared with the SSE route; later tasks emit through it. */
-    bus: EventBus;
-  }
-}
-
 export const COOKIE_NAME = 'ac_token';
 
 // Resolves to <package>/dist/web from both src/server and dist/server.
@@ -86,7 +79,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const { store, token, port } = deps;
   const bus = deps.bus ?? new EventBus();
   const app = Fastify();
-  app.decorate('bus', bus);
   const sseClients = new Set<ServerResponse>();
 
   const hosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);

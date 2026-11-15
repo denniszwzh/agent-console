@@ -1,28 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { readJsonl, type JsonlEntry } from './jsonl.js';
 
 const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 
-type Entry = Record<string, any>;
-
-function parseLines(path: string): Entry[] {
-  let raw: string;
-  try {
-    raw = readFileSync(path, 'utf8');
-  } catch {
-    return [];
-  }
-  const entries: Entry[] = [];
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const obj = JSON.parse(line);
-      if (obj && typeof obj === 'object') entries.push(obj);
-    } catch {
-      // skip malformed line
-    }
-  }
-  return entries;
-}
+type Entry = JsonlEntry;
 
 function isRealUserPrompt(e: Entry): boolean {
   if (e.type !== 'user' || e.isMeta || e.isSidechain) return false;
@@ -32,7 +12,7 @@ function isRealUserPrompt(e: Entry): boolean {
 }
 
 export function findChangedFilesClaude(transcriptPath: string, sessionId: string): string[] {
-  const entries = parseLines(transcriptPath);
+  const entries = readJsonl(transcriptPath);
   let start = -1;
   for (let i = entries.length - 1; i >= 0; i--) {
     if (isRealUserPrompt(entries[i])) {

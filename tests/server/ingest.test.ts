@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildApp } from '../../src/server/app.js';
 import { UnitStore } from '../../src/server/store.js';
-import type { ServerEvent } from '../../src/server/events.js';
-import type { Thread } from '../../src/shared/types.js';
+import { EventBus } from '../../src/server/events.js';
+import type { ServerEvent, Thread } from '../../src/shared/types.js';
 
 const TOKEN = 'secret-token';
 const PORT = 4317;
@@ -44,9 +44,10 @@ const stop = (app: ReturnType<typeof buildApp>, sessionId = 'sess-1', msg = '# D
 describe('stop hook ingestion', () => {
   it('creates unit with reply blocks and file snapshots', async () => {
     const store = new UnitStore();
-    const app = buildApp({ store, token: TOKEN, port: PORT });
+    const bus = new EventBus();
+    const app = buildApp({ store, token: TOKEN, port: PORT, bus });
     const events: ServerEvent[] = [];
-    app.bus.subscribe((e) => events.push(e));
+    bus.subscribe((e) => events.push(e));
     const res = await stop(app);
     expect(res.statusCode).toBe(200);
     const { unitId } = res.json();
@@ -69,7 +70,8 @@ describe('stop hook ingestion', () => {
 
   it('new unit marks previous open unit stale and its unresolved threads expired', async () => {
     const store = new UnitStore();
-    const app = buildApp({ store, token: TOKEN, port: PORT });
+    const bus = new EventBus();
+    const app = buildApp({ store, token: TOKEN, port: PORT, bus });
     const first = (await stop(app)).json().unitId as string;
     const u = store.get(first)!;
     const mkThread = (id: string, status: Thread['status']): Thread => ({
@@ -88,7 +90,7 @@ describe('stop hook ingestion', () => {
     store.save(u);
 
     const events: ServerEvent[] = [];
-    app.bus.subscribe((e) => events.push(e));
+    bus.subscribe((e) => events.push(e));
     const second = (await stop(app)).json().unitId as string;
 
     const old = store.get(first)!;

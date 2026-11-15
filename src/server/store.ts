@@ -2,15 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { isSafeId } from '../shared/ids.js';
-import type { AgentKind, ReviewUnit } from '../shared/types.js';
+import type { AgentKind, ReviewUnit, SessionSummary } from '../shared/types.js';
 import { dataDir } from './paths.js';
-
-export interface SessionInfo {
-  sessionId: string;
-  agent: AgentKind;
-  cwd: string;
-  lastActivity: string;
-}
 
 /** What the index keeps per unit: enough to list and order without reading the file. */
 interface IndexEntry {
@@ -127,8 +120,8 @@ export class UnitStore {
     return null;
   }
 
-  listSessions(): SessionInfo[] {
-    const bySession = new Map<string, SessionInfo>();
+  listSessions(): SessionSummary[] {
+    const bySession = new Map<string, SessionSummary>();
     for (const e of this.index.values()) {
       const cur = bySession.get(e.sessionId);
       if (!cur || e.createdAt > cur.lastActivity) {
