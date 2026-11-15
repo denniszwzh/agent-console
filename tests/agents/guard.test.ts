@@ -16,8 +16,6 @@ describe('decideGuard allowlist', () => {
     'git branch -r',
     'git branch --list',
     'git branch -v',
-    'rg foo src',
-    'grep -rn foo src',
     'ls -la',
     'dir',
     'cat a.md',
@@ -25,15 +23,13 @@ describe('decideGuard allowlist', () => {
     'head -n 5 a.md',
     'tail -n 5 a.md',
     'wc -l a.md',
-    'find . -name *.md',
     'git diff HEAD~1 -- docs/spec.md',
-    'rg -n TODO src',
     '  git log -5  ',
   ])('allows %s', (cmd) => {
     expect(allow(cmd)).toBe(true);
   });
 
-  it.each([`Get-Content docs${String.fromCharCode(92)}spec.md`, 'Get-Content a.md', 'get-content a.md', 'Get-ChildItem -Recurse .', 'Select-String -Path a.md -Pattern foo'])(
+  it.each([`Get-Content docs${String.fromCharCode(92)}spec.md`, 'Get-Content a.md', 'get-content a.md', 'Get-ChildItem -Recurse .', 'Get-ChildItem src'])(
     'allows PowerShell %s',
     (cmd) => {
       expect(allow(cmd, 'PowerShell')).toBe(true);
@@ -174,7 +170,7 @@ describe('decideGuard quoting / expansion bypasses (fix round 1)', () => {
     expect(allow('find .\u0085-delete')).toBe(false);
   });
 
-  it.each(['git log -5', 'git diff HEAD~1 -- docs/spec.md', 'rg -n TODO src', 'ls -la src', 'grep -rn foo src', 'find . -name *.md'])(
+  it.each(['git log -5', 'git diff HEAD~1 -- docs/spec.md', 'git show HEAD', 'git blame src/a.ts', 'git status', 'ls -la src', 'cat docs/spec.md', 'head -n 20 a.md', 'wc -l a.md'])(
     'still allows (Bash) %j',
     (cmd) => {
       expect(allow(cmd, 'Bash')).toBe(true);
@@ -182,6 +178,78 @@ describe('decideGuard quoting / expansion bypasses (fix round 1)', () => {
   );
   it('still allows PowerShell Get-Content with a backslash path', () => {
     expect(allow(`Get-Content docs${BS}spec.md`, 'PowerShell')).toBe(true);
+  });
+});
+
+describe('decideGuard round 2 (shrunk allowlist, globs, UNC, follow flags)', () => {
+  const BS = String.fromCharCode(92);
+  const bash = [
+    'rg hello *',
+    'rg -n TODO src',
+    'rg foo src',
+    'grep -rn foo src',
+    'grep -f//host/share/x foo .',
+    'rg -f//host/share/x .',
+    'rg -z foo',
+    'rg -.z foo',
+    'rg -0z foo',
+    'find victim -del*',
+    'find . -name x',
+    'git log *',
+    'git log ?',
+    'git diff --out*',
+    'cat [-]delete',
+    'cat a]',
+    'git diff -O//host/share/x',
+    'git diff -O orderfile',
+    'git log -nO x',
+    'cat a//b',
+    'tail -f x',
+    'tail -F x',
+    'tail -nf 5 x',
+    'tail --follow x',
+    'tail --follow x',
+    'cat a::b',
+    'ls *',
+    'ls a?',
+  ];
+  it.each(bash)('rejects (Bash) %j', (cmd) => {
+    expect(allow(cmd, 'Bash')).toBe(false);
+  });
+
+  const ps = [
+    'Get-Content -Path:' + BS + 'host' + BS + 'share' + BS + 'x',
+    'Get-Content FileSystem::' + BS + 'host' + BS + 'share',
+    'Get-Content -Wait x',
+    'Get-Content -wait x',
+    'Get-Content -Wa x',
+    'Get-Content a' + BS + BS + 'b',
+    'Get-Content -LiteralPath:x',
+    'Get-ChildItem *',
+    'Get-ChildItem -Filter *.md',
+    'Get-ChildItem [a]',
+    'Select-String -Path a.md -Pattern foo',
+    'rg foo',
+    'grep foo x',
+    'find . -delete',
+    'tail -f x',
+    'git log *',
+    'git diff -O' + BS + BS + 'host' + BS + 'x',
+    'cat a//b',
+  ];
+  it.each(ps)('rejects (PowerShell) %j', (cmd) => {
+    expect(allow(cmd, 'PowerShell')).toBe(false);
+  });
+
+  it('still allows the kept PowerShell forms', () => {
+    expect(allow('Get-Content docs' + BS + 'spec.md', 'PowerShell')).toBe(true);
+    expect(allow('Get-ChildItem src', 'PowerShell')).toBe(true);
+    expect(allow('Get-ChildItem C:' + BS + 'repo' + BS + 'src', 'PowerShell')).toBe(true);
+    expect(allow('git log -5', 'PowerShell')).toBe(true);
+  });
+
+  it('still allows tail without follow flags', () => {
+    expect(allow('tail -n 5 a.md')).toBe(true);
   });
 });
 
