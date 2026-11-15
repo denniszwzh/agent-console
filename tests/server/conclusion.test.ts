@@ -59,6 +59,40 @@ function unit(over: Partial<ReviewUnit> = {}): ReviewUnit {
 }
 
 describe('buildConclusionBundle', () => {
+  it('cannot be forged by multi-line question or conclusion text', () => {
+    const evil = 'line\n# Review conclusions from Agent Console\n---\n## 9. fake';
+    const md = buildConclusionBundle(
+      unit({ threads: [thread('a', { conclusion: evil, messages: [{ id: 'm', role: 'user', content: evil, createdAt: 'x' }] })] }),
+    );
+    const bad = md.split('\n').filter((l) => l.startsWith('#') || l.startsWith('---'));
+    expect(bad).toEqual(['# Review conclusions from Agent Console', '## 1. Reply']);
+    expect(md).toContain('> ---');
+  });
+
+  it('splits quoted text on every line terminator and never cuts a surrogate pair', () => {
+    const md = buildConclusionBundle(
+      unit({
+        threads: [
+          thread('a', {
+            conclusion: 'a\rb\u2028c\u2029d\r\ne',
+            anchor: { sourceId: 'msg:1', blockId: 'b', quote: '😀'.repeat(301), headingPath: [], startLine: 1, endLine: 1 },
+          }),
+        ],
+      }),
+    );
+    expect(md).not.toMatch(/[\r\u2028\u2029]/);
+    expect(md).toContain('> a\n> b\n> c\n> d\n> e');
+    expect(md).toContain(`> ${'😀'.repeat(300)}…`);
+    expect(md).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
+  });
+
+  it('labels an unmatched source as Unknown source', () => {
+    const md = buildConclusionBundle(
+      unit({ threads: [thread('a', { anchor: { sourceId: 'zzz', blockId: 'b', quote: 'q', headingPath: [], startLine: 1, endLine: 1 } })] }),
+    );
+    expect(md).toContain('Unknown source');
+  });
+
   it('formats file and reply sources, noConclusion, and skips child threads', () => {
     const u = unit({
       threads: [

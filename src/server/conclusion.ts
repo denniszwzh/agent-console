@@ -3,19 +3,27 @@ import type { ReviewUnit, Thread } from '../shared/types.js';
 const QUOTE_LIMIT = 300;
 
 function sourceLabel(unit: ReviewUnit, t: Thread): string {
-  const file = unit.files.find((f) => f.id === t.anchor.sourceId);
-  if (!file || t.anchor.sourceId.startsWith('msg:') || unit.reply.id === t.anchor.sourceId) return 'Reply';
+  const id = t.anchor.sourceId;
+  if (id.startsWith('msg:') || id === unit.reply.id) return 'Reply';
+  const file = unit.files.find((f) => f.id === id);
+  if (!file) return 'Unknown source';
   const hp = t.anchor.headingPath;
   const section = hp.length > 0 ? ` § ${hp.join(' > ')}` : '';
   return `${file.path ?? 'unknown file'}${section} (lines ${t.anchor.startLine}–${t.anchor.endLine})`;
 }
 
-function quoteBlock(quote: string): string {
-  const q = quote.length > QUOTE_LIMIT ? `${quote.slice(0, QUOTE_LIMIT)}…` : quote;
-  return q
-    .split(/\r?\n/)
+/** Blockquote every line so untrusted text cannot forge bundle structure. */
+function quoteLines(text: string): string {
+  return text
+    .split(/\r\n|[\r\n\u2028\u2029]/)
     .map((l) => `> ${l}`)
     .join('\n');
+}
+
+function quoteBlock(quote: string): string {
+  const chars = Array.from(quote);
+  const q = chars.length > QUOTE_LIMIT ? `${chars.slice(0, QUOTE_LIMIT).join('')}…` : quote;
+  return quoteLines(q);
 }
 
 /** Render the top-level threads of a unit as a Markdown conclusion bundle. */
@@ -35,9 +43,11 @@ export function buildConclusionBundle(unit: ReviewUnit): string {
       '',
       quoteBlock(t.anchor.quote),
       '',
-      `**Question:** ${question}`,
+      '**Question:**',
+      quoteLines(question),
       '',
-      `**Conclusion:** ${conclusion}`,
+      '**Conclusion:**',
+      quoteLines(conclusion),
     );
   });
   return parts.join('\n') + '\n';
