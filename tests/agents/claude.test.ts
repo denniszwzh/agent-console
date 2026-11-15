@@ -38,6 +38,7 @@ describe('buildClaudeArgs', () => {
     const i = a.indexOf('--disallowedTools');
     expect(a.slice(i + 1, i + 5)).toEqual(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
     expect(a[a.indexOf('--settings') + 1]).toBe('g.json');
+    expect(a[a.indexOf('--permission-mode') + 1]).toBe('default');
   });
 
   it('matches the documented argv shape', () => {
@@ -45,7 +46,7 @@ describe('buildClaudeArgs', () => {
       '-p', '--resume', 'parent-1', '--fork-session', '--output-format', 'stream-json', '--verbose',
       '--tools', 'Read,Grep,Glob,Bash,PowerShell',
       '--disallowedTools', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
-      '--strict-mcp-config', '--settings', 'g.json',
+      '--strict-mcp-config', '--permission-mode', 'default', '--settings', 'g.json',
     ]);
   });
 });
@@ -133,17 +134,25 @@ describe('createClaudeAdapter.run', () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
+  let guardStub: string;
   function fake(body: string) {
+    guardStub = path.join(home, 'dist', 'hooks', 'claude-guard.js');
+    fs.mkdirSync(path.dirname(guardStub), { recursive: true });
+    fs.writeFileSync(guardStub, '');
     const file = path.join(home, 'fake-claude.mjs');
     fs.writeFileSync(file, body);
-    return createClaudeAdapter({ bin: process.execPath, binArgs: [file], guardScript: 'C:\\x\\dist\\hooks\\claude-guard.js' });
+    return createClaudeAdapter({ bin: process.execPath, binArgs: [file], guardScript: guardStub });
   }
 
   it('writes guard-settings.json with the PreToolUse hook', () => {
     fake('');
     const s = JSON.parse(fs.readFileSync(path.join(home, 'guard-settings.json'), 'utf8'));
     expect(s.hooks.PreToolUse[0].matcher).toBe('Bash|PowerShell');
-    expect(s.hooks.PreToolUse[0].hooks[0]).toEqual({ type: 'command', command: 'node "C:/x/dist/hooks/claude-guard.js"' });
+    expect(s.hooks.PreToolUse[0].hooks[0]).toEqual({ type: 'command', command: `node "${guardStub.split(path.sep).join('/')}"` });
+  });
+
+  it('throws when the guard script does not exist (never run unguarded)', () => {
+    expect(() => createClaudeAdapter({ bin: 'x', guardScript: path.join(home, 'missing.js') })).toThrow(/guard script/i);
   });
 
   it('passes the prompt via stdin, sets AGENT_CONSOLE_FORK, and streams events', async () => {
@@ -152,7 +161,7 @@ describe('createClaudeAdapter.run', () => {
       process.stdin.setEncoding('utf8');
       process.stdin.on('data', (c) => (data += c));
       process.stdin.on('end', () => {
-        const text = JSON.stringify({ stdin: data, fork: process.env.AGENT_CONSOLE_FORK, argv: process.argv.slice(2) });
+        const text = JSON.stringify({ stdin: data, fork: process.env.AGENT_CONSOLE_FORK, locks: process.env.GIT_OPTIONAL_LOCKS, argv: process.argv.slice(2) });
         console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'new-id' }));
         console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'new-id' }));
       });`);
@@ -164,6 +173,7 @@ describe('createClaudeAdapter.run', () => {
     const got = JSON.parse(done.finalText);
     expect(got.stdin).toBe(prompt);
     expect(got.fork).toBe('1');
+    expect(got.locks).toBe('0');
     expect(got.argv).toContain('--strict-mcp-config');
     expect(got.argv.join(' ')).not.toContain('引號');
   });
@@ -178,7 +188,8 @@ describe('createClaudeAdapter.run', () => {
   });
 
   it('emits an error when the binary cannot be spawned', async () => {
-    const adapter = createClaudeAdapter({ bin: path.join(home, 'no-such-binary'), guardScript: 'g.js' });
+    fake('');
+    const adapter = createClaudeAdapter({ bin: path.join(home, 'no-such-binary'), guardScript: guardStub });
     const ev = await collect(adapter.run({ parentSessionId: 'p', fork: true, prompt: 'x', cwd: home }));
     expect(ev[ev.length - 1].type).toBe('error');
   });

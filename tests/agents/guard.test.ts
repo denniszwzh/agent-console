@@ -25,13 +25,15 @@ describe('decideGuard allowlist', () => {
     'head -n 5 a.md',
     'tail -n 5 a.md',
     'wc -l a.md',
-    'find . -name "*.ts"',
+    'find . -name *.md',
+    'git diff HEAD~1 -- docs/spec.md',
+    'rg -n TODO src',
     '  git log -5  ',
   ])('allows %s', (cmd) => {
     expect(allow(cmd)).toBe(true);
   });
 
-  it.each(['Get-Content a.md', 'get-content a.md', 'Get-ChildItem -Recurse .', 'Select-String -Path a.md -Pattern foo'])(
+  it.each([`Get-Content docs${String.fromCharCode(92)}spec.md`, 'Get-Content a.md', 'get-content a.md', 'Get-ChildItem -Recurse .', 'Select-String -Path a.md -Pattern foo'])(
     'allows PowerShell %s',
     (cmd) => {
       expect(allow(cmd, 'PowerShell')).toBe(true);
@@ -111,6 +113,75 @@ describe('decideGuard rejects', () => {
 
   it.each(['Write', 'Edit', 'mcp__desktop-commander__write_file', 'Read', ''])('rejects tool %j', (tool) => {
     expect(allow('ls', tool)).toBe(false);
+  });
+});
+
+describe('decideGuard quoting / expansion bypasses (fix round 1)', () => {
+  const BS = String.fromCharCode(92);
+  const both = [
+    'find . "-delete"',
+    "find . -del''ete",
+    'find . $\'-delete\'',
+    'find . -${x:=delete}',
+    'git log -1 "--output=x.txt"',
+    "git log -1 --out''put=x.txt",
+    'git diff "--ext-diff"',
+    'rg "--pre=rm" foo .',
+    "git log -1 '--output=x.txt'",
+    "rg '--pre=cmd' foo .",
+    'cat ${x:=$\'\x24(touch pwned1)\'} ${x@P}',
+    'cat ${x:=$\'a[\x24(touch pwned2)]\'} $[x]',
+    'ls $HOME',
+    'ls \u2018-x\u2019',
+    'ls \u201cx\u201d',
+    'ls !x',
+    'ls #x',
+    'ls a=b',
+    'ls @x',
+    'ls %x',
+    'ls ~/x',
+    'ls <x',
+    'git log --output x.txt',
+    'git log --show-signature',
+    'rg -z foo',
+    'rg --search-zip foo',
+    'cat /dev/tcp/1.2.3.4/80',
+    'cat /dev/udp/1.2.3.4/80',
+    'ls\u0000x',
+    'ls\u0007x',
+  ];
+  it.each(both)('rejects (Bash) %j', (cmd) => {
+    expect(allow(cmd, 'Bash')).toBe(false);
+  });
+  it.each(both)('rejects (PowerShell) %j', (cmd) => {
+    expect(allow(cmd, 'PowerShell')).toBe(false);
+  });
+
+  it.each([`find . -dele${BS}te`, `ls a${BS}b`, 'cat //host/share/x', 'cat //host/share/x'])('rejects (Bash) %j', (cmd) => {
+    expect(allow(cmd, 'Bash')).toBe(false);
+  });
+
+  it.each([`Get-Content ${BS}host${BS}share${BS}x`, 'Get-Content //host/share/x', 'Get-Content -Command:x', 'Get-Content -command:x', 'Get-Content -CommandX y'])(
+    'rejects (PowerShell) %j',
+    (cmd) => {
+      expect(allow(cmd, 'PowerShell')).toBe(false);
+    },
+  );
+
+  it('splits on Unicode whitespace so NBSP cannot hide an option', () => {
+    expect(allow('find .\u00a0-delete')).toBe(false);
+    expect(allow('find .\u2028-delete')).toBe(false);
+    expect(allow('find .\u0085-delete')).toBe(false);
+  });
+
+  it.each(['git log -5', 'git diff HEAD~1 -- docs/spec.md', 'rg -n TODO src', 'ls -la src', 'grep -rn foo src', 'find . -name *.md'])(
+    'still allows (Bash) %j',
+    (cmd) => {
+      expect(allow(cmd, 'Bash')).toBe(true);
+    },
+  );
+  it('still allows PowerShell Get-Content with a backslash path', () => {
+    expect(allow(`Get-Content docs${BS}spec.md`, 'PowerShell')).toBe(true);
   });
 });
 

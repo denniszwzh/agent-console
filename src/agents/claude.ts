@@ -18,6 +18,7 @@ export function buildClaudeArgs(req: RunRequest, guardSettingsPath: string): str
     '--tools', 'Read,Grep,Glob,Bash,PowerShell',
     '--disallowedTools', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
     '--strict-mcp-config',
+    '--permission-mode', 'default',
     '--settings', guardSettingsPath,
   ];
 }
@@ -73,6 +74,8 @@ export interface ClaudeAdapterOptions {
 }
 
 function writeGuardSettings(guardScript: string): string {
+  // Never run a fork without its read-only hook: a missing script would make the hook fail open.
+  if (!fs.existsSync(guardScript)) throw new Error(`guard script not found: ${guardScript} (run npm run build)`);
   const file = path.join(dataDir(), 'guard-settings.json');
   const script = path.resolve(guardScript).replace(/\\/g, '/');
   const settings = {
@@ -95,7 +98,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions = {}): AgentAdapt
       const args = [...(opts.binArgs ?? []), ...buildClaudeArgs(req, guardSettingsPath)];
       const child = spawn(bin, args, {
         cwd: req.cwd,
-        env: { ...process.env, AGENT_CONSOLE_FORK: '1' },
+        env: { ...process.env, AGENT_CONSOLE_FORK: '1', GIT_OPTIONAL_LOCKS: '0' },
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       });
