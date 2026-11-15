@@ -83,6 +83,8 @@ function writeGuardSettings(guardScript: string): string {
   const file = path.join(dataDir(), 'guard-settings.json');
   const script = path.resolve(guardScript).replace(/\\/g, '/');
   const settings = {
+    // Flag settings outrank project and local settings: a repo's "disableAllHooks": true must not disable the guard.
+    disableAllHooks: false,
     hooks: {
       PreToolUse: [{ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: `node "${script}"` }] }],
     },

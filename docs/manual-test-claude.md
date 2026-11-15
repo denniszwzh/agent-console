@@ -116,3 +116,44 @@ Decision: ADOPTED. `src/agents/claude.ts` `buildClaudeArgs` appends `--setting-s
 
 Side note: with `--output-format stream-json --verbose` the `result` line is followed by a trailing `system:task_summary` line, so "the last line is the
 result" is not exact; `parseClaudeStream` returns at `result`, so it is unaffected.
+
+## Project `disableAllHooks` vs the fork guard (final review item 7, 2026-11-15, Claude Code 2.1.302)
+
+Question: a repository can ship `.claude/settings.json` (or a user can have `.claude/settings.local.json`) with
+`"disableAllHooks": true`. Forks load project and local settings (`--setting-sources project,local`), so does our
+`--settings` PreToolUse guard still run?
+
+Setup: scratch git repo under `%TEMP%`, temporary `AGENT_CONSOLE_HOME`, parent session from
+`claude -p "Reply with exactly: hi" --output-format json --setting-sources project,local`. Each fork used the exact
+`buildClaudeArgs` argv from `dist/agents/claude.js` (spawned directly, prompt on stdin). To observe the hook directly, the
+adapter's `guardScript` option pointed at a wrapper that appended every PreToolUse input to a log file and then ran the real
+`dist/hooks/claude-guard.js`. Prompt: "Run exactly this one PowerShell command and nothing else: git log --oneline -1".
+
+| Project / local settings | `disableAllHooks` in our `--settings` file | Guard invocations | Command result |
+| --- | --- | --- | --- |
+| `.claude/settings.json` = `{}` | absent | 1 | ran (`f995619 init`) |
+| `.claude/settings.json` = `{"disableAllHooks":true}` | absent | 0 | ran (Claude's built-in read-only approval) |
+| `.claude/settings.local.json` = `{"disableAllHooks":true}` | absent | 0 | ran |
+| `.claude/settings.json` = `{"disableAllHooks":true}` | `false` | 1 | ran |
+| `.claude/settings.local.json` = `{"disableAllHooks":true}` | `false` | 1 | ran |
+
+Result: the guard does NOT run when project or local settings set `disableAllHooks: true` (this held even though the scratch
+workspace was untrusted). Setting `"disableAllHooks": false` in the `--settings` file overrides both, because flag settings
+outrank project and local settings.
+
+Side observation: in the untrusted scratch workspace Claude ignored the project's `permissions.allow` entries
+("Ignoring 2 permissions.allow entries from .claude/settings.json: this workspace has not been trusted") and denied
+`Set-Content` with its own working-directory check. In a trusted workspace those allow rules would apply, so without the guard
+a repo could combine `disableAllHooks` with `permissions.allow: ["PowerShell"]` to let a fork write.
+
+Fix: ADOPTED. `writeGuardSettings` in `src/agents/claude.ts` writes `"disableAllHooks": false` next to the guard hook
+(RED: the new test in `tests/agents/claude.test.ts` failed, then GREEN).
+Final check with the rebuilt adapter, project `{"disableAllHooks":true}`, prompt asking for `git log --oneline -1` and then
+`Set-Content probe-fixed.txt hi`: guard invocations 2; `git log` ran; the write got
+`PreToolUse:PowerShell hook error: blocked by agent-console read-only guard: command not on the read-only allowlist: Set-Content`;
+no `probe-fixed.txt`.
+
+Not covered: managed (policy) settings, which outrank flag settings; a managed `disableAllHooks: true` would still switch the
+guard off (the PowerShell/Bash default-mode permission checks and the post-check warning remain).
+The scratch repo and temporary home were deleted. The runs left their transcripts under
+`~/.claude/projects/C--Users-Dennis-AppData-Local-Temp-ac-claude-dah-282102/` (new files only; nothing existing was modified).

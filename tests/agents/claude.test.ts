@@ -157,6 +157,13 @@ describe('createClaudeAdapter.run', () => {
     expect(s.hooks.PreToolUse[0].hooks[0]).toEqual({ type: 'command', command: `node "${guardStub.split(path.sep).join('/')}"` });
   });
 
+  it('re-enables hooks so a project/local "disableAllHooks": true cannot switch the guard off', () => {
+    // Verified with Claude Code 2.1.302: flag settings win over project and local settings (docs/manual-test-claude.md).
+    fake('');
+    const s = JSON.parse(fs.readFileSync(path.join(home, 'guard-settings.json'), 'utf8'));
+    expect(s.disableAllHooks).toBe(false);
+  });
+
   it('throws when the guard script does not exist (never run unguarded)', () => {
     expect(() => createClaudeAdapter({ bin: 'x', guardScript: path.join(home, 'missing.js') })).toThrow(/guard script/i);
   });
