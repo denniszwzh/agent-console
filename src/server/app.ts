@@ -6,6 +6,8 @@ import { EventBus } from './events.js';
 import { registerHookRoutes } from './routes/hooks.js';
 import { registerUnitRoutes } from './routes/units.js';
 import type { ThreadEngine } from './threads.js';
+import { readConfig } from './paths.js';
+import type { Config } from '../shared/types.js';
 
 /** Implemented by the thread engine so ingestion can skip sessions it forked itself. */
 export interface ForkRegistry {
@@ -19,6 +21,7 @@ export interface AppDeps {
   forks?: ForkRegistry;
   bus?: EventBus;
   engine?: ThreadEngine;
+  config?: Config;
 }
 
 declare module 'fastify' {
@@ -135,8 +138,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
     });
 
-    registerHookRoutes(api, { store, bus, forks: deps.forks ?? deps.engine });
-    if (deps.engine) registerUnitRoutes(api, { engine: deps.engine });
+    registerHookRoutes(api, { store, bus, config: deps.config ?? readConfig(), forks: deps.forks ?? deps.engine });
+    if (deps.engine) registerUnitRoutes(api, { engine: deps.engine, store, bus });
   });
 
   app.addHook('onClose', async () => {

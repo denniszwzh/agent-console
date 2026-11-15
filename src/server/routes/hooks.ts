@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import type { ReviewUnit, Source } from '../../shared/types.js';
+import type { Config, ReviewUnit, Source } from '../../shared/types.js';
 import { splitBlocks } from '../../shared/blocks.js';
 import { findChangedFilesClaude } from '../transcript.js';
 import { takeSnapshot } from '../snapshot.js';
 import type { EventBus } from '../events.js';
 import type { UnitStore } from '../store.js';
 import type { ForkRegistry } from '../app.js';
+import { buildConclusionBundle } from '../conclusion.js';
 
 interface StopBody {
   session_id?: unknown;
@@ -17,9 +18,9 @@ interface StopBody {
 
 export function registerHookRoutes(
   app: FastifyInstance,
-  deps: { store: UnitStore; bus: EventBus; forks?: ForkRegistry },
+  deps: { store: UnitStore; bus: EventBus; config: Config; forks?: ForkRegistry },
 ): void {
-  const { store, bus, forks } = deps;
+  const { store, bus, config, forks } = deps;
 
   app.post('/api/hooks/claude/stop', async (req, reply) => {
     const body = (req.body ?? {}) as StopBody;
@@ -71,5 +72,35 @@ export function registerHookRoutes(
     for (const prev of staled) bus.emit({ type: 'unit.updated', unitId: prev.id, sessionId });
     bus.emit({ type: 'unit.created', unitId: unit.id, sessionId });
     return { unitId: unit.id };
+  });
+
+  app.get('/api/hooks/claude/prompt', async (req, reply) => {
+    const session = (req.query as { session?: unknown }).session;
+    if (typeof session !== 'string' || !session) return reply.code(400).send({ error: 'session query required' });
+
+    const units = store.listBySession(session);
+    const pending = units
+      .filter((u) => u.status === 'submitted' && !u.delivered)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+    if (pending) {
+      pending.delivered = true;
+      store.save(pending);
+      bus.emit({ type: 'unit.updated', unitId: pending.id, sessionId: session });
+      return { action: 'inject', text: buildConclusionBundle(pending) };
+    }
+
+    if (config.hardGate) {
+      const latestOpen = units
+        .filter((u) => u.status === 'open')
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      const n = latestOpen ? latestOpen.threads.filter((t) => t.status !== 'resolved').length : 0;
+      if (n > 0) {
+        return {
+          action: 'block',
+          reason: `Agent Console: ${n} review thread(s) still open. Finish or delete them before continuing.`,
+        };
+      }
+    }
+    return { action: 'none' };
   });
 }

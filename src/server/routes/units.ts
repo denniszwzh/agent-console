@@ -1,5 +1,11 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Anchor } from '../../shared/types.js';
+import { buildConclusionBundle } from '../conclusion.js';
+import type { EventBus } from '../events.js';
+import { dataDir } from '../paths.js';
+import type { UnitStore } from '../store.js';
 import { ConflictError, NotFoundError, ValidationError, type ThreadEngine } from '../threads.js';
 
 function isAnchor(a: unknown): a is Anchor {
@@ -15,8 +21,11 @@ function isAnchor(a: unknown): a is Anchor {
   );
 }
 
-export function registerUnitRoutes(app: FastifyInstance, deps: { engine: ThreadEngine }): void {
-  const { engine } = deps;
+export function registerUnitRoutes(
+  app: FastifyInstance,
+  deps: { engine: ThreadEngine; store: UnitStore; bus: EventBus },
+): void {
+  const { engine, store, bus } = deps;
 
   const handle = async (reply: FastifyReply, fn: () => unknown) => {
     try {
@@ -92,6 +101,24 @@ export function registerUnitRoutes(app: FastifyInstance, deps: { engine: ThreadE
       }
       engine.setConclusion(id, body.conclusion);
       return engine.getThread(id);
+    }),
+  );
+
+  app.post('/api/units/:id/submit', async (req, reply) =>
+    handle(reply, () => {
+      const { id } = req.params as { id: string };
+      const unit = store.get(id);
+      if (!unit) throw new NotFoundError('unit not found');
+      if (!engine.canSubmit(id)) throw new ConflictError('unit cannot be submitted: open threads remain or unit is not open');
+      const bundle = buildConclusionBundle(unit);
+      const dir = path.join(dataDir(), 'conclusions');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${id}.md`), bundle);
+      unit.status = 'submitted';
+      unit.delivered = false;
+      store.save(unit);
+      bus.emit({ type: 'unit.updated', unitId: id, sessionId: unit.sessionId });
+      return { bundle };
     }),
   );
 }
