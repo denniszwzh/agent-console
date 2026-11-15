@@ -102,6 +102,9 @@ Optional safety net: pass `-o <tmpfile>` and read it for the final text if no `a
 
 ### Does `-s read-only` block writes? YES (VERIFIED)
 
+Scope: this write test ran on a plain fresh `exec`, NOT on a fork. For forks the only evidence is that the fork's rollout `turn_context.sandbox_policy` is `{"type":"read-only"}`.
+Also, fresh `exec` with the prompt on stdin (`-`) was exercised only in that (unrecorded) hook/write spike; the recorded `codex-exec.jsonl` used a prompt argument.
+
 Command (hook `-c` flags omitted here; they were inert, see Hooks):
 
 ```
@@ -132,7 +135,7 @@ Discovered next to each active config layer: `~/.codex/hooks.json`, `~/.codex/co
 `<repo>/.codex/hooks.json`, `<repo>/.codex/config.toml` (project layer only if the project is trusted). All matching hooks run. Plugins can bundle hooks.
 Command hooks run with the session `cwd`. `commandWindows` / `command_windows` gives a Windows-only command. `timeout` is in seconds (default 600).
 
-TOML form (the user's own `~/.codex/config.toml` already uses this form for an `Interrupt` hook):
+TOML form:
 
 ```toml
 [[hooks.Stop]]
@@ -149,13 +152,15 @@ Events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `
 `PreModelRequest`, `PostModelRequest`, `SubagentStart`, `SubagentStop`, `Stop`, `Interrupt`, `SessionEnd`.
 `matcher` is ignored for `UserPromptSubmit`, `Stop`, `Interrupt`. For `apply_patch` PreToolUse/PostToolUse, matcher can be `apply_patch`, `Edit` or `Write`.
 
-### Hook trust (IMPORTANT, VERIFIED)
+### Hook trust (symptom VERIFIED, cause DOCS/inferred)
 
 Non-managed hooks must be reviewed/trusted before they run. Trust is stored per hook as a hash in the user's config
 (`[hooks.state."<config path>:<event>:<i>:<j>"] trusted_hash = "sha256:..."`) and is granted through `/hooks` in the interactive TUI.
-Observation: I ran `codex exec -s read-only --json -c 'hooks.SessionStart=...' -c 'hooks.PreToolUse=...' -c 'hooks.PostToolUse=...' -c 'hooks.UserPromptSubmit=...' -c 'hooks.Stop=...' -`
+Observation (symptom only): I ran `codex exec -s read-only --json -c 'hooks.SessionStart=...' -c 'hooks.PreToolUse=...' -c 'hooks.PostToolUse=...' -c 'hooks.UserPromptSubmit=...' -c 'hooks.Stop=...' -`
 with a Node script that writes its stdin to a file. The run succeeded but NO hook file was written and there was no warning on stderr or in `--json`:
-untrusted hooks are silently skipped in `exec` mode. The only non-interactive override is `--dangerously-bypass-hook-trust`
+hooks passed this way did not fire in `exec` mode, silently. That missing trust is the cause is INFERRED from the docs; there was no control run
+(for example a hook defined in a file and already trusted). The alternative explanation, that the `-c hooks.<Event>=[...]` form is simply not honoured by `exec`,
+is equally consistent with what was observed and was not ruled out. The documented non-interactive override is `--dangerously-bypass-hook-trust`
 (documented, "for automation that already vets hook sources"); the environment's permission layer refused that flag for this spike, and writing a trust hash needs
 a change to `~/.codex/config.toml` (forbidden), so no hook input could be captured live.
 
@@ -170,13 +175,13 @@ Consequences for the adapter / installer:
 Every command hook gets exactly one JSON object on stdin. Common keys: `session_id`, `transcript_path` (string|null), `cwd`, `hook_event_name`,
 `model`, `permission_mode` (`default|acceptEdits|plan|dontAsk|bypassPermissions`). Turn-scoped events add `turn_id`.
 
-- `Stop` (`tests/fixtures/codex-hook-stop.json`): + `turn_id`, `stop_hook_active`, `last_assistant_message`. All of these are required by the schema.
-- `UserPromptSubmit` (`tests/fixtures/codex-hook-user-prompt-submit.json`): + `turn_id`, `prompt`; optional `agent_id`, `agent_type`.
+- `Stop` (`tests/fixtures/codex-hook-stop.docs.json`): + `turn_id`, `stop_hook_active`, `last_assistant_message`. All of these are required by the schema.
+- `UserPromptSubmit` (`tests/fixtures/codex-hook-user-prompt-submit.docs.json`): + `turn_id`, `prompt`; optional `agent_id`, `agent_type`.
 - `PostToolUse` / `PreToolUse`: + `turn_id`, `tool_name` (`Bash`, `apply_patch`, `mcp__server__tool`, ...), `tool_use_id`, `tool_input`
   (`tool_input.command` for Bash and apply_patch; for apply_patch that is the patch text), PostToolUse also `tool_response`.
 - `SessionStart`: + `source` = `startup|resume|clear|compact|fork`.
 
-These fixtures were written from the published schema; the values (ids, prompt, message) are real ones from this spike's first run, the
+These `.docs.json` fixtures carry a `"_source"` key saying they are not live captures (ignore that key when parsing). They were written from the published schema; the values (ids, prompt, message) are real ones from this spike's first run, the
 path fields use placeholders. Re-capture them with a trusted hook when convenient and diff against the files.
 
 The answer to "does the input contain session id and the rollout path": yes, `session_id` and `transcript_path`. The docs warn that the
@@ -202,6 +207,9 @@ My test hook printed `The secret word is PINEAPPLE...` for UserPromptSubmit; bec
   Example: `~/.codex/sessions/2026/11/15/rollout-2026-11-15T13-01-43-01a1dd95-2d4f-7b60-99eb-5e63136a8137.jsonl`.
   Resolve a rollout from a session id by globbing `sessions/*/*/*/rollout-*-<id>.jsonl`. `CODEX_HOME` overrides `~/.codex`.
   Other state in `~/.codex`: `session_index.jsonl`, `state_5.sqlite`, `queue_1.sqlite`, `thread_history_1.sqlite`.
+- `tests/fixtures/codex-rollout-apply-patch-blocked.jsonl` is a TRIMMED excerpt of one rollout, not a full file. Dropped: `additional_tools`, developer-role and `environment_context`
+  messages, `world_state`, `thread_settings_applied`, `token_usage_record` / `token_count`; `session_meta` lost `creator_user_id`, `creator_account_id`, `base_instructions`;
+  `turn_context` is reduced to turn_id/cwd/approval_policy/sandbox_policy/permission_profile/model. Kept: `task_started`, user message, `custom_tool_call`, `custom_tool_call_output`, `AgentMessage` items, `task_complete`.
 - One JSON object per line: `{"timestamp", "ordinal", "type", "payload"}`. Top-level `type` values: `session_meta` (first line:
   `id`, `session_id`, `cwd`, `cli_version`, `source`, `git`, `forked_from_id` for forks, plus large `base_instructions`; also account ids, sanitise before sharing),
   `turn_context` (`cwd`, `approval_policy`, `sandbox_policy`, `permission_profile`, `model`), `event_msg`, `response_item`, `world_state`, `token_usage_record`.
