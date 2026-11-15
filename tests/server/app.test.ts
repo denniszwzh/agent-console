@@ -80,6 +80,14 @@ describe('app auth and host checks', () => {
     expect((await app.inject({ method: 'GET', url: '/api/units/bad', headers: h })).statusCode).toBe(500);
   });
 
+  it('GET /api/units/..%2Foutside cannot read outside the units directory', async () => {
+    const app = mk();
+    const h = { host: HOST, authorization: `Bearer ${TOKEN}` };
+    writeFileSync(join(home, 'outside.json'), JSON.stringify({ id: 'outside', sessionId: 's' }));
+    expect((await app.inject({ method: 'GET', url: '/api/units/..%2Foutside', headers: h })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: '/api/units/..%5Coutside', headers: h })).statusCode).toBe(404);
+  });
+
   it('cannot bypass auth with a percent-encoded path', async () => {
     const app = mk();
     const get = await app.inject({ method: 'GET', url: '/%61pi/sessions', headers: { host: HOST } });

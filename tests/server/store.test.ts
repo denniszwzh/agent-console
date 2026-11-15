@@ -79,11 +79,11 @@ describe('UnitStore edge cases', () => {
     expect(() => store.get('bad')).toThrow();
   });
 
-  it('list methods skip corrupt files with a warning', () => {
-    const store = new UnitStore();
-    store.save(makeUnit('ok', 's1', '2026-01-01T00:00:00.000Z'));
+  it('list methods skip corrupt files with a warning (at index build)', () => {
+    new UnitStore().save(makeUnit('ok', 's1', '2026-01-01T00:00:00.000Z'));
     fs.writeFileSync(path.join(home, 'units', 'bad.json'), '{not json');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = new UnitStore();
     expect(store.listBySession('s1').map((u) => u.id)).toEqual(['ok']);
     expect(store.listSessions()).toHaveLength(1);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('bad.json'));
@@ -115,5 +115,44 @@ describe('ensureToken', () => {
     fs.mkdirSync(path.join(home, 'token'));
     expect(() => ensureToken()).toThrow();
     expect(fs.statSync(path.join(home, 'token')).isDirectory()).toBe(true);
+  });
+});
+
+describe('UnitStore index (final review item 2 / R-F3)', () => {
+  it('rebuilds the session index from disk at construction (survives a restart)', () => {
+    const a = new UnitStore();
+    a.save(makeUnit('u1', 's1', '2026-01-01T00:00:00.000Z'));
+    a.save(makeUnit('u2', 's1', '2026-03-01T00:00:00.000Z'));
+    a.save(makeUnit('u3', 's2', '2026-02-01T00:00:00.000Z'));
+    const b = new UnitStore();
+    expect(b.listBySession('s1').map((u) => u.id)).toEqual(['u1', 'u2']);
+    expect(b.latestForSession('s1')?.id).toBe('u2');
+    expect(b.listSessions().map((s) => s.sessionId)).toEqual(['s1', 's2']);
+  });
+
+  it('save keeps the index current and list calls never scan the directory', () => {
+    const store = new UnitStore();
+    const readdir = vi.spyOn(fs, 'readdirSync');
+    store.save(makeUnit('u1', 's1', '2026-01-01T00:00:00.000Z'));
+    store.save(makeUnit('u2', 's2', '2026-02-01T00:00:00.000Z'));
+    expect(store.listBySession('s1').map((u) => u.id)).toEqual(['u1']);
+    expect(store.latestForSession('s2')?.id).toBe('u2');
+    expect(store.listSessions().map((s) => [s.sessionId, s.lastActivity])).toEqual([
+      ['s2', '2026-02-01T00:00:00.000Z'],
+      ['s1', '2026-01-01T00:00:00.000Z'],
+    ]);
+    expect(readdir).not.toHaveBeenCalled();
+    readdir.mockRestore();
+  });
+});
+
+describe('UnitStore unit id safety (final review item 5)', () => {
+  it('get returns null and save throws for ids that are not safe file names', () => {
+    const store = new UnitStore();
+    fs.writeFileSync(path.join(home, 'outside.json'), JSON.stringify(makeUnit('outside', 's1', '2026-01-01T00:00:00.000Z')));
+    for (const id of ['../outside', '..\outside', '.hidden', '', 'a/b']) {
+      expect(store.get(id)).toBeNull();
+      expect(() => store.save(makeUnit(id, 's1', '2026-01-01T00:00:00.000Z'))).toThrow(/unit id/);
+    }
   });
 });
