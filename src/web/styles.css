@@ -490,6 +490,30 @@ textarea {
 .block {
   position: relative;
 }
+
+/*
+ * Each block renders as its own .markdown whose outer margins are reset, so the
+ * rhythm between paragraphs, headings and list items is set here instead.
+ */
+.block + .block {
+  margin-top: 1rem;
+}
+.block + .block-heading {
+  margin-top: 2rem;
+}
+.block-heading + .block {
+  margin-top: 0.6rem;
+}
+.block-listItem + .block-listItem {
+  margin-top: 0.3rem;
+}
+.block + .block-heading:has(h1),
+.block + .block-heading:has(h2) {
+  margin-top: 2.4rem;
+}
+.source-code .block + .block {
+  margin-top: 0;
+}
 .block-body {
   border-radius: 4px;
 }

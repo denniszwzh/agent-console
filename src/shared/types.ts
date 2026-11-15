@@ -7,6 +7,8 @@ export interface Block {
   startLine: number;
   endLine: number;
   headingPath: string[];
+  /** Number of an ordered list item within its list (items are split into separate blocks). */
+  ordinal?: number;
 }
 
 export interface Source {

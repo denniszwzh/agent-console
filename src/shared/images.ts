@@ -10,6 +10,9 @@ export const IMAGE_CONTENT_TYPES: Readonly<Record<string, string>> = {
   avif: 'image/avif',
 };
 
+/** Extensions treated as images everywhere (snapshots, the image endpoint, the UI). */
+export const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set(Object.keys(IMAGE_CONTENT_TYPES));
+
 /**
  * True for a relative or absolute filesystem path. URLs with a scheme
  * (http:, https:, data:, file:, ...), protocol-relative URLs and UNC paths are

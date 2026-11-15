@@ -75,4 +75,9 @@ describe('block ids', () => {
       .slice(0, 12);
     expect(b.id).toBe(`${expected}-0`);
   });
+
+  it('records the ordinal of ordered list items, including lazily numbered lists', () => {
+    const blocks = splitBlocks('1. a\n1. b\n1. c\n\n- x\n- y\n\n4. four\n5. five', 'markdown');
+    expect(blocks.map((b) => b.ordinal)).toEqual([1, 2, 3, undefined, undefined, 4, 5]);
+  });
 });

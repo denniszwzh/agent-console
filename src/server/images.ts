@@ -30,15 +30,33 @@ function isMarkdownFile(language: string | undefined): boolean {
   return language === 'md' || language === 'markdown';
 }
 
-/** Image paths a unit may serve: its image files plus local images referenced from its Markdown. */
-export function allowedImagePaths(unit: ReviewUnit): Set<string> {
-  const allowed = new Set<string>();
-  for (const f of unit.files) if (f.image && f.path) allowed.add(f.path);
-  const docs = [unit.reply.content];
-  for (const f of unit.files) if (isMarkdownFile(f.language)) docs.push(f.content);
-  for (const t of unit.threads) for (const m of t.messages) if (m.role === 'assistant') docs.push(m.content);
-  for (const doc of docs) for (const ref of markdownImageRefs(doc)) allowed.add(ref);
-  return allowed;
+/** Where a source's image references come from and what relative paths resolve against. */
+interface ImageScope {
+  refs: string[];
+  baseDir: string;
+}
+
+/**
+ * The image scope of one source of a unit: the reply, a file ('<fileId>') or an
+ * answer ('msg:<messageId>'). Null when the source does not exist.
+ */
+function imageScope(unit: ReviewUnit, sourceId: string, requested: string): ImageScope | null {
+  if (sourceId === unit.reply.id) return { refs: markdownImageRefs(unit.reply.content), baseDir: unit.cwd };
+  if (sourceId.startsWith('msg:')) {
+    const messageId = sourceId.slice('msg:'.length);
+    for (const t of unit.threads) {
+      const m = t.messages.find((x) => x.id === messageId && x.role === 'assistant');
+      if (m) return { refs: markdownImageRefs(m.content), baseDir: unit.cwd };
+    }
+    return null;
+  }
+  const file = unit.files.find((f) => f.id === sourceId);
+  if (!file?.path) return null;
+  // An image file shows itself; its path is relative to the unit cwd.
+  if (file.image && requested === file.path) return { refs: [file.path], baseDir: unit.cwd };
+  if (!isMarkdownFile(file.language)) return null;
+  // A Markdown file's relative images resolve against the file's own directory.
+  return { refs: markdownImageRefs(file.content), baseDir: path.dirname(path.resolve(unit.cwd, file.path)) };
 }
 
 export interface ResolvedImage {
@@ -47,14 +65,16 @@ export interface ResolvedImage {
 }
 
 /**
- * Resolve a requested image path for a unit, or null when it must not be served:
- * not referenced by the unit, not a local path, not an image extension, or a UNC target.
+ * Resolve an image requested for one source of a unit, or null when it must not be
+ * served: the source does not reference it, it is not a local path, it is not an
+ * image extension, it points at a network share, or the file does not exist.
  */
-export function resolveUnitImage(unit: ReviewUnit, requested: string): ResolvedImage | null {
-  if (!requested || !isLocalImagePath(requested)) return null;
-  if (!allowedImagePaths(unit).has(requested)) return null;
+export function resolveUnitImage(unit: ReviewUnit, sourceId: string, requested: string): ResolvedImage | null {
+  if (!sourceId || !requested || !isLocalImagePath(requested)) return null;
   const contentType = IMAGE_CONTENT_TYPES[imageExtension(requested)];
   if (!contentType) return null;
+  const scope = imageScope(unit, sourceId, requested);
+  if (!scope || !scope.refs.includes(requested)) return null;
   const candidates = [requested];
   try {
     const decoded = decodeURI(requested);
@@ -63,7 +83,7 @@ export function resolveUnitImage(unit: ReviewUnit, requested: string): ResolvedI
     /* keep the literal path only */
   }
   for (const c of candidates) {
-    const file = path.resolve(unit.cwd, c);
+    const file = path.resolve(scope.baseDir, c);
     // Never touch network shares or device paths (e.g. \\host\share, \\?\...).
     if (file.startsWith('\\\\') || file.startsWith('//')) return null;
     try {

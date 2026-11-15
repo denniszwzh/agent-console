@@ -25,7 +25,8 @@ export interface UnitContextValue {
   actions: UnitActions;
   /** Threads anchored on one block of one source (a reply, a file, or 'msg:<id>'). */
   threadsAt(sourceId: string, blockId: string): Thread[];
-  imageUrl(path: string): string;
+  /** URL for a local image path as referenced by the given source. */
+  imageUrl(sourceId: string, path: string): string;
 }
 
 const UnitContext = createContext<UnitContextValue | null>(null);
@@ -44,7 +45,7 @@ export function UnitProvider({ unit, actions, children }: { unit: ReviewUnit; ac
       readOnly: unit.status !== 'open',
       actions,
       threadsAt: (sourceId, blockId) => byAnchor.get(`${sourceId}\n${blockId}`) ?? [],
-      imageUrl: (p) => imageUrl(unit.id, p),
+      imageUrl: (sourceId, p) => imageUrl(unit.id, sourceId, p),
     };
   }, [unit, actions]);
   return <UnitContext.Provider value={value}>{children}</UnitContext.Provider>;

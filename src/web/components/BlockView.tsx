@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Anchor, Block } from '../../shared/types.js';
 import { useUnit } from '../unit-context.js';
 import { CodeBlock } from './CodeBlock.js';
@@ -23,6 +23,19 @@ interface SelectionAsk {
   left: number;
 }
 
+/** The current non-empty selection, if it lies entirely inside `container`. */
+function selectedRangeIn(container: HTMLElement | null): Range | null {
+  const sel = window.getSelection();
+  if (!container || !sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  return container.contains(range.startContainer) && container.contains(range.endContainer) ? range : null;
+}
+
+/** Ordered list items are rendered one by one, so restore each item's number in its list. */
+function withOrdinal(text: string, ordinal: number | undefined): string {
+  return ordinal === undefined ? text : text.replace(/^(\s*)\d{1,9}([.)])/, `$1${ordinal}$2`);
+}
+
 export function BlockView({ block, sourceId, parentThreadId, mode = 'markdown', lang }: Props) {
   const { readOnly, actions, threadsAt, imageUrl } = useUnit();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -30,23 +43,29 @@ export function BlockView({ block, sourceId, parentThreadId, mode = 'markdown', 
   const [composerQuote, setComposerQuote] = useState<string | null>(null);
   const [selectionAsk, setSelectionAsk] = useState<SelectionAsk | null>(null);
   const threads = threadsAt(sourceId, block.id);
+  const showingSelectionAsk = selectionAsk !== null;
+
+  // Drop the floating button once the selection collapses or moves out of this block.
+  useEffect(() => {
+    if (!showingSelectionAsk) return;
+    const onChange = () => {
+      if (!selectedRangeIn(bodyRef.current)) setSelectionAsk(null);
+    };
+    document.addEventListener('selectionchange', onChange);
+    return () => document.removeEventListener('selectionchange', onChange);
+  }, [showingSelectionAsk]);
 
   const onMouseUp = () => {
     if (readOnly) return;
-    const sel = window.getSelection();
-    const quote = sel && !sel.isCollapsed ? sel.toString().trim() : '';
-    if (!sel || !quote || !bodyRef.current || !rootRef.current) {
+    const range = selectedRangeIn(bodyRef.current);
+    const quote = range ? range.toString().trim() : '';
+    if (!range || !quote || !rootRef.current) {
       setSelectionAsk(null);
       return;
     }
-    // Only offer a question when the whole selection lies inside this block.
-    const range = sel.getRangeAt(0);
-    if (!bodyRef.current.contains(range.startContainer) || !bodyRef.current.contains(range.endContainer)) {
-      setSelectionAsk(null);
-      return;
-    }
-    const rect = range.getBoundingClientRect();
     const host = rootRef.current.getBoundingClientRect();
+    // getBoundingClientRect on ranges is missing in some environments (e.g. jsdom).
+    const rect = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect() : host;
     setSelectionAsk({ quote, top: rect.bottom - host.top + 6, left: Math.max(0, rect.right - host.left - 24) });
   };
 
@@ -69,12 +88,12 @@ export function BlockView({ block, sourceId, parentThreadId, mode = 'markdown', 
   };
 
   return (
-    <div ref={rootRef} className={`block${threads.length ? ' has-threads' : ''}`} data-block-id={block.id}>
+    <div ref={rootRef} className={`block block-${block.kind}${threads.length ? ' has-threads' : ''}`} data-block-id={block.id}>
       <div ref={bodyRef} className="block-body" onMouseUp={onMouseUp}>
         {mode === 'code' ? (
           <CodeBlock code={block.text} lang={lang} startLine={block.startLine} />
         ) : (
-          <Markdown content={block.text} imageUrl={imageUrl} />
+          <Markdown content={withOrdinal(block.text, block.ordinal)} imageUrl={(p) => imageUrl(sourceId, p)} />
         )}
       </div>
       {!readOnly && (
@@ -86,6 +105,7 @@ export function BlockView({ block, sourceId, parentThreadId, mode = 'markdown', 
         <button
           type="button"
           className="ask-selection"
+          title="針對選取的文字提問"
           style={{ top: selectionAsk.top, left: selectionAsk.left }}
           // Keep the text selection alive while clicking.
           onMouseDown={(e) => e.preventDefault()}

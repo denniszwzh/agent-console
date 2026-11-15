@@ -96,7 +96,8 @@ export function ConclusionBar() {
   const [expanded, setExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const topLevel = unit.threads.filter((t) => t.parentThreadId === null);
-  const resolvedCount = unit.threads.filter((t) => t.status === 'resolved').length;
+  // Child conclusions are folded into their parent, so the counter tracks the listed (top-level) threads.
+  const resolvedCount = topLevel.filter((t) => t.status === 'resolved').length;
   const drafts = unit.threads.filter((t) => t.status === 'draft').length;
   const submittable = canSubmit(unit);
 
@@ -123,7 +124,7 @@ export function ConclusionBar() {
       )}
       <div className="bar-row">
         <button type="button" className="btn ghost" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-          {expanded ? '▾' : '▸'} 結論預覽（{resolvedCount}/{unit.threads.length}）
+          {expanded ? '▾' : '▸'} 結論預覽（{resolvedCount}/{topLevel.length}）
         </button>
         <span className="spacer" />
         {!readOnly && (

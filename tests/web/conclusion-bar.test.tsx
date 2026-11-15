@@ -31,6 +31,18 @@ describe('ConclusionBar', () => {
     expect(screen.getByRole('button', { name: '送出結論' })).toHaveProperty('disabled', false);
   });
 
+  it('counts top-level threads in the preview counter', () => {
+    const unit = makeUnit();
+    const a = anchorOn(unit);
+    unit.threads = [
+      makeThread('t1', a, { status: 'resolved', conclusion: 'Keep it.' }),
+      makeThread('t2', a, { status: 'awaiting' }),
+      makeThread('t3', { ...a, sourceId: 'msg:m1' }, { parentThreadId: 't2', status: 'resolved', conclusion: 'x' }),
+    ];
+    renderInUnit(<ConclusionBar />, unit);
+    expect(screen.getByRole('button', { name: /結論預覽（1\/2）/ })).toBeTruthy();
+  });
+
   it('shows the Claude delivery hint after submit', () => {
     const unit = makeUnit({ status: 'submitted' });
     unit.threads = [makeThread('t1', anchorOn(unit), { status: 'resolved', conclusion: 'Keep it.' })];

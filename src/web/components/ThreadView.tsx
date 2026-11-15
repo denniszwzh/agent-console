@@ -47,7 +47,7 @@ export function ThreadView({ thread, blockText }: Props) {
                 {m.blocks?.length ? (
                   m.blocks.map((b) => <BlockView key={b.id} block={b} sourceId={`msg:${m.id}`} parentThreadId={thread.id} />)
                 ) : (
-                  <Markdown content={m.content} imageUrl={imageUrl} />
+                  <Markdown content={m.content} imageUrl={(p) => imageUrl(`msg:${m.id}`, p)} />
                 )}
               </div>
             ),

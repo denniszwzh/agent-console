@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs';
 import { extname, resolve } from 'node:path';
 import type { Source } from '../shared/types.js';
 import { splitBlocks } from '../shared/blocks.js';
+import { IMAGE_EXTENSIONS } from '../shared/images.js';
 
 export const MAX_SNAPSHOT_BYTES = 1_048_576;
-const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
 
 export function takeSnapshot(filePath: string, cwd: string): Source {
   const ext = extname(filePath).slice(1).toLowerCase();
@@ -17,7 +17,7 @@ export function takeSnapshot(filePath: string, cwd: string): Source {
     blocks: [],
     language: ext || undefined,
   };
-  const isImage = IMAGE_EXTS.has(ext);
+  const isImage = IMAGE_EXTENSIONS.has(ext);
   if (isImage) source.image = true;
 
   let buf: Buffer;

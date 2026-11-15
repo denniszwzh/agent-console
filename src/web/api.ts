@@ -62,8 +62,9 @@ export const api = {
   addFile: (unitId: string, path: string) => request<Source>('POST', `/api/units/${enc(unitId)}/files`, { path }),
 };
 
-export function imageUrl(unitId: string, path: string): string {
-  return `/api/units/${enc(unitId)}/image?path=${enc(path)}`;
+/** URL of a local image referenced by one source (reply, file id, or 'msg:<messageId>') of a unit. */
+export function imageUrl(unitId: string, sourceId: string, path: string): string {
+  return `/api/units/${enc(unitId)}/image?source=${enc(sourceId)}&path=${enc(path)}`;
 }
 
 /** Subscribe to server events; EventSource reconnects on its own. Returns an unsubscribe function. */

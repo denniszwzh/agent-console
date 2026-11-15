@@ -43,6 +43,7 @@ interface RawBlock {
   startLine: number;
   endLine: number;
   headingPath: string[];
+  ordinal?: number;
 }
 
 function assignIds(raw: RawBlock[]): Block[] {
@@ -67,15 +68,17 @@ function splitMarkdown(content: string): Block[] {
   const tree = unified().use(remarkParse).use(remarkGfm).parse(content);
   const raw: RawBlock[] = [];
   const path: { depth: number; title: string }[] = [];
-  const push = (node: any, headingPath: string[]) => {
+  const push = (node: any, headingPath: string[], ordinal?: number) => {
     const pos = node.position;
-    raw.push({
+    const block: RawBlock = {
       kind: node.type,
       text: content.slice(pos.start.offset, pos.end.offset),
       startLine: pos.start.line,
       endLine: pos.end.line,
       headingPath,
-    });
+    };
+    if (ordinal !== undefined) block.ordinal = ordinal;
+    raw.push(block);
   };
   for (const node of tree.children as any[]) {
     if (!node.position) continue;
@@ -84,7 +87,11 @@ function splitMarkdown(content: string): Block[] {
       push(node, path.map((p) => p.title));
       path.push({ depth: node.depth, title: plainText(node).trim() });
     } else if (node.type === 'list') {
-      for (const item of node.children) push(item, path.map((p) => p.title));
+      // Ordered items are split apart, so each keeps its number in the list.
+      const start = typeof node.start === 'number' ? node.start : 1;
+      node.children.forEach((item: any, i: number) =>
+        push(item, path.map((p) => p.title), node.ordered ? start + i : undefined),
+      );
     } else {
       push(node, path.map((p) => p.title));
     }

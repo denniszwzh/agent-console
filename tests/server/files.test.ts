@@ -53,7 +53,8 @@ function setup(over: Partial<ReviewUnit> = {}) {
   return { app: buildApp({ store, token: TOKEN, port: 4317, bus, engine }), store, events };
 }
 
-const imageUrl = (p: string) => `/api/units/unit-1/image?path=${encodeURIComponent(p)}`;
+const imageUrl = (p: string, source = 'reply-1') =>
+  `/api/units/unit-1/image?source=${encodeURIComponent(source)}&path=${encodeURIComponent(p)}`;
 
 describe('GET /api/units/:id/image', () => {
   it('image endpoint rejects paths not referenced by the unit', async () => {
@@ -65,7 +66,9 @@ describe('GET /api/units/:id/image', () => {
     // Referenced, but not an image extension.
     expect((await app.inject({ method: 'GET', url: imageUrl('notes.txt'), headers })).statusCode).toBe(404);
     expect((await app.inject({ method: 'GET', url: '/api/units/unit-1/image', headers })).statusCode).toBe(404);
-    expect((await app.inject({ method: 'GET', url: '/api/units/nope/image?path=img%2Fok.png', headers })).statusCode).toBe(404);
+    // A path without its source is not served.
+    expect((await app.inject({ method: 'GET', url: '/api/units/unit-1/image?path=img%2Fok.png', headers })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: '/api/units/nope/image?source=reply-1&path=img%2Fok.png', headers })).statusCode).toBe(404);
     // Referenced image is served, and only with a token.
     const ok = await app.inject({ method: 'GET', url: imageUrl('img/ok.png'), headers });
     expect(ok.statusCode).toBe(200);
@@ -93,16 +96,50 @@ describe('GET /api/units/:id/image', () => {
         },
       ],
     });
-    const png = await app.inject({ method: 'GET', url: imageUrl('shot.png'), headers });
+    const png = await app.inject({ method: 'GET', url: imageUrl('shot.png', 'f1'), headers });
     expect(png.statusCode).toBe(200);
-    const svg = await app.inject({ method: 'GET', url: imageUrl('img/a.svg'), headers });
+    const svg = await app.inject({ method: 'GET', url: imageUrl('img/a.svg', 'f2'), headers });
     expect(svg.statusCode).toBe(200);
     expect(svg.headers['content-type']).toBe('image/svg+xml');
     expect(svg.headers['content-security-policy']).toBe('sandbox');
     expect(svg.headers['x-content-type-options']).toBe('nosniff');
-    const gif = await app.inject({ method: 'GET', url: imageUrl('img/b.gif'), headers });
+    const gif = await app.inject({ method: 'GET', url: imageUrl('img/b.gif', 'msg:m1'), headers });
     expect(gif.statusCode).toBe(200);
     expect(gif.headers['content-type']).toBe('image/gif');
+  });
+
+  it('resolves images of a Markdown file against the file directory', async () => {
+    mkdirSync(join(work, 'docs', 'img'), { recursive: true });
+    writeFileSync(join(work, 'docs', 'img', 'flow.png'), PNG);
+    const { app } = setup({
+      files: [{ id: 'f1', kind: 'file', path: 'docs/spec.md', content: '![flow](img/flow.png)', blocks: [], language: 'md' }],
+    });
+    const res = await app.inject({ method: 'GET', url: imageUrl('img/flow.png', 'f1'), headers });
+    expect(res.statusCode).toBe(200);
+    expect(res.rawPayload.equals(PNG)).toBe(true);
+  });
+
+  it('serves a reference only under the source that makes it', async () => {
+    writeFileSync(join(work, 'img', 'ok.png'), PNG);
+    writeFileSync(join(work, 'img', 'b.gif'), 'GIF89a');
+    const { app } = setup({
+      files: [{ id: 'f1', kind: 'file', path: 'shot.png', content: '', blocks: [], image: true, binary: true }],
+      threads: [
+        {
+          id: 't1', unitId: 'unit-1', parentThreadId: null,
+          anchor: { sourceId: 'reply-1', blockId: 'b', quote: 'q', headingPath: [], startLine: 1, endLine: 1 },
+          forkFromSessionId: 'main-sess', sessionId: 's1', status: 'awaiting', conclusion: null, noConclusion: false,
+          messages: [{ id: 'm1', role: 'assistant', content: 'Look: ![b](img/b.gif)', createdAt: '' }],
+        },
+      ],
+    });
+    // The reply references img/ok.png; the answer and the image file do not.
+    expect((await app.inject({ method: 'GET', url: imageUrl('img/ok.png', 'reply-1'), headers })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: imageUrl('img/ok.png', 'msg:m1'), headers })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: imageUrl('img/ok.png', 'f1'), headers })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: imageUrl('img/b.gif', 'reply-1'), headers })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: imageUrl('img/b.gif', 'msg:nope'), headers })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: imageUrl('img/ok.png', 'unknown'), headers })).statusCode).toBe(404);
   });
 
   it('refuses UNC and URL references even when referenced', async () => {
@@ -137,6 +174,20 @@ describe('POST /api/units/:id/files', () => {
     expect(files).toHaveLength(1);
     expect(files[0].blocks.length).toBe(2);
     expect(events).toContain('unit.updated:unit-1');
+  });
+
+  it('rejects missing files, directories and duplicates without adding a tab', async () => {
+    writeFileSync(join(work, 'a.md'), '# A');
+    const { app, store } = setup();
+    const post = (p: string) => app.inject({ method: 'POST', url: '/api/units/unit-1/files', headers, payload: { path: p } });
+    expect((await post('missing.md')).statusCode).toBe(400);
+    expect((await post('img')).statusCode).toBe(400);
+    expect(store.get('unit-1')!.files).toHaveLength(0);
+    expect((await post('a.md')).statusCode).toBe(200);
+    // Same file, spelled differently.
+    expect((await post('./a.md')).statusCode).toBe(409);
+    expect((await post(join(work, 'a.md'))).statusCode).toBe(409);
+    expect(store.get('unit-1')!.files).toHaveLength(1);
   });
 
   it('validates the body and the unit', async () => {

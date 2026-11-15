@@ -27,7 +27,7 @@ export function SourceView({ source }: { source: Source }) {
       {source.truncated && <div className="note">檔案超過 1 MB，只顯示前 1 MB 的內容。</div>}
       {source.image && source.path && !source.error ? (
         <figure className="image-source">
-          <img src={imageUrl(source.path)} alt={source.path} />
+          <img src={imageUrl(source.id, source.path)} alt={source.path} />
         </figure>
       ) : source.binary ? (
         <div className="note">二進位檔，不顯示內容。</div>

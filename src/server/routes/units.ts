@@ -23,6 +23,20 @@ function isAnchor(a: unknown): a is Anchor {
   );
 }
 
+function isFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Comparison key for an absolute path (Windows paths are case-insensitive). */
+function pathKey(p: string): string {
+  const n = path.normalize(p);
+  return process.platform === 'win32' ? n.toLowerCase() : n;
+}
+
 export function registerUnitRoutes(
   app: FastifyInstance,
   deps: { engine: ThreadEngine; store: UnitStore; bus: EventBus },
@@ -114,6 +128,14 @@ export function registerUnitRoutes(
       const unit = store.get(id);
       if (!unit) throw new NotFoundError('unit not found');
       if (unit.status !== 'open') throw new ConflictError(`unit is ${unit.status}`);
+      const absolute = path.resolve(unit.cwd, filePath.trim());
+      // Never touch network shares or device paths (e.g. \\host\share, \\?\...).
+      if (absolute.startsWith('\\\\') || absolute.startsWith('//')) throw new ValidationError('network paths are not allowed');
+      if (!isFile(absolute)) throw new ValidationError('file not found');
+      const key = pathKey(absolute);
+      if (unit.files.some((f) => f.path && pathKey(path.resolve(unit.cwd, f.path)) === key)) {
+        throw new ConflictError('file is already part of this review');
+      }
       const source = takeSnapshot(filePath.trim(), unit.cwd);
       unit.files.push(source);
       store.save(unit);
@@ -124,9 +146,10 @@ export function registerUnitRoutes(
 
   app.get('/api/units/:id/image', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const requested = (req.query as { path?: unknown }).path;
+    const { source, path: requested } = req.query as { source?: unknown; path?: unknown };
     const unit = store.get(id);
-    const image = unit && typeof requested === 'string' ? resolveUnitImage(unit, requested) : null;
+    const image =
+      unit && typeof source === 'string' && typeof requested === 'string' ? resolveUnitImage(unit, source, requested) : null;
     if (!image) return reply.code(404).send({ error: 'not found' });
     return reply
       .header('Content-Type', image.contentType)
