@@ -17,6 +17,10 @@ export class EventBus {
     }
   }
 
+  subscriberCount(): number {
+    return this.subscribers.size;
+  }
+
   subscribe(fn: (e: ServerEvent) => void): () => void {
     this.subscribers.add(fn);
     return () => {

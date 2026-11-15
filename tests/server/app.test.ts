@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import http from 'node:http';
+import net from 'node:net';
 import { buildApp } from '../../src/server/app.js';
 import { UnitStore } from '../../src/server/store.js';
 
@@ -76,5 +78,85 @@ describe('app auth and host checks', () => {
     mkdirSync(join(home, 'units'), { recursive: true });
     writeFileSync(join(home, 'units', 'bad.json'), '{oops');
     expect((await app.inject({ method: 'GET', url: '/api/units/bad', headers: h })).statusCode).toBe(500);
+  });
+
+  it('cannot bypass auth with a percent-encoded path', async () => {
+    const app = mk();
+    const get = await app.inject({ method: 'GET', url: '/%61pi/sessions', headers: { host: HOST } });
+    expect(get.statusCode).toBe(401);
+    const post = await app.inject({ method: 'POST', url: '/%61pi/hooks/claude/stop', headers: { host: HOST }, payload: {} });
+    expect(post.statusCode).toBe(401);
+    const unit = await app.inject({ method: 'GET', url: '/%61pi/units/x', headers: { host: HOST } });
+    expect(unit.statusCode).toBe(401);
+    const ok = await app.inject({ method: 'GET', url: '/%61pi/sessions', headers: { host: HOST, authorization: `Bearer ${TOKEN}` } });
+    expect(ok.statusCode).toBe(200);
+  });
+
+  it('enforces Host and Origin on /auth and on unknown paths', async () => {
+    const app = mk();
+    const a = await app.inject({ method: 'GET', url: `/auth?token=${TOKEN}`, headers: { host: 'evil.com' } });
+    expect(a.statusCode).toBe(403);
+    const b = await app.inject({ method: 'GET', url: `/auth?token=${TOKEN}`, headers: { host: HOST, origin: 'http://evil.com' } });
+    expect(b.statusCode).toBe(403);
+    const c = await app.inject({ method: 'GET', url: '/nope', headers: { host: 'evil.com' } });
+    expect(c.statusCode).toBe(403);
+  });
+
+  it('handles Origin variants', async () => {
+    const app = mk();
+    const h = { host: HOST, authorization: `Bearer ${TOKEN}` };
+    expect((await app.inject({ method: 'GET', url: '/api/sessions', headers: { ...h, origin: 'null' } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: '/api/sessions', headers: { ...h, origin: `http://localhost:${PORT}` } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/sessions', headers: { host: `localhost:${PORT}`, authorization: `Bearer ${TOKEN}` } })).statusCode).toBe(200);
+  });
+
+  it('handles cookie edge cases', async () => {
+    const app = mk();
+    const get = (cookie: string) => app.inject({ method: 'GET', url: '/api/sessions', headers: { host: HOST, cookie } });
+    expect((await get('ac_token=wrong')).statusCode).toBe(401);
+    expect((await get(`other=1; ac_token=${TOKEN}; x=y`)).statusCode).toBe(200);
+    expect((await get('ac_token=%E0%A4%A')).statusCode).toBe(401);
+    expect((await get('ac_token')).statusCode).toBe(401);
+  });
+});
+
+async function freePort(): Promise<number> {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.listen(0, '127.0.0.1', () => {
+      const port = (srv.address() as net.AddressInfo).port;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+describe('SSE', () => {
+  it('streams bus events and unsubscribes on disconnect', async () => {
+    const port = await freePort();
+    const app = buildApp({ store: new UnitStore(), token: TOKEN, port });
+    await app.listen({ host: '127.0.0.1', port });
+    try {
+      const req = http.get({
+        host: '127.0.0.1', port, path: '/api/events',
+        headers: { host: `127.0.0.1:${port}`, authorization: `Bearer ${TOKEN}` },
+      });
+      const res = await new Promise<http.IncomingMessage>((resolve) => req.on('response', resolve));
+      expect(res.headers['content-type']).toContain('text/event-stream');
+      expect(app.bus.subscriberCount()).toBe(1);
+      const received = new Promise<string>((resolve) => {
+        let buf = '';
+        res.on('data', (c) => {
+          buf += c.toString();
+          if (buf.includes('data: ')) resolve(buf);
+        });
+      });
+      app.bus.emit({ type: 'unit.created', unitId: 'u1', sessionId: 's1' });
+      expect(await received).toContain('data: {"type":"unit.created","unitId":"u1","sessionId":"s1"}');
+      req.destroy();
+      for (let i = 0; i < 50 && app.bus.subscriberCount() > 0; i++) await new Promise((r) => setTimeout(r, 20));
+      expect(app.bus.subscriberCount()).toBe(0);
+    } finally {
+      await app.close();
+    }
   });
 });
