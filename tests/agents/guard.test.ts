@@ -21,7 +21,6 @@ describe('decideGuard allowlist', () => {
     'cat a.md',
     'type a.md',
     'head -n 5 a.md',
-    'tail -n 5 a.md',
     'wc -l a.md',
     'git diff HEAD~1 -- docs/spec.md',
     '  git log -5  ',
@@ -277,8 +276,21 @@ describe('decideGuard round 2 (shrunk allowlist, globs, UNC, follow flags)', () 
     expect(allow('ls src', 'PowerShell')).toBe(true);
   });
 
-  it('still allows tail without follow flags', () => {
-    expect(allow('tail -n 5 a.md')).toBe(true);
+});
+
+describe('decideGuard round 4 (tail removed from the allowlist)', () => {
+  // GNU tail's obsolete `+NUMf` syntax follows the file and hangs; forks use the Read tool instead.
+  const tails = ['tail +f x', 'tail +5f x', 'tail +1f a.md', 'tail -n 5 a.md', 'tail a.md'];
+  it.each(tails)('rejects (Bash) %j', (cmd) => {
+    expect(allow(cmd, 'Bash')).toBe(false);
+  });
+  it.each(tails)('rejects (PowerShell) %j', (cmd) => {
+    expect(allow(cmd, 'PowerShell')).toBe(false);
+  });
+
+  it('still allows head', () => {
+    expect(allow('head -n 5 a.md', 'Bash')).toBe(true);
+    expect(allow('head -n 5 a.md', 'PowerShell')).toBe(true);
   });
 });
 

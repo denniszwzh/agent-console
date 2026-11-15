@@ -13,8 +13,10 @@ const ALLOW: GuardDecision = { allow: true, reason: 'read-only command' };
 
 // Searching is deliberately NOT here (grep/rg/find/Select-String): forks have the built-in Grep and
 // Glob tools, and those commands' option surface (exec, pre-processors, -f files) is too large.
+// tail is excluded too: its follow modes (-f, --follow abbreviations, obsolete +NUMf) hang, and
+// the built-in Read tool already reads any line range of a file.
 // Command names, POSIX tools are matched case-sensitively, PowerShell cmdlets case-insensitively.
-const POSIX_COMMANDS = new Set(['git', 'ls', 'dir', 'cat', 'type', 'head', 'tail', 'wc']);
+const POSIX_COMMANDS = new Set(['git', 'ls', 'dir', 'cat', 'type', 'head', 'wc']);
 const CMDLETS = new Set(['get-content', 'get-childitem']);
 const POWERSHELL_ALIASES: Record<string, string> = {
   cat: 'get-content', type: 'get-content', gc: 'get-content',
@@ -64,15 +66,6 @@ function checkGit(args: string[]): GuardDecision {
   return bad === undefined ? ALLOW : deny(`git argument not allowed: ${bad}`);
 }
 
-function checkTail(args: string[]): GuardDecision {
-  // Follow flags (also inside short clusters such as -nf) would hang until the tool times out.
-  // GNU long options may be abbreviated: --f, --fo, --foll ... all mean --follow.
-  const bad = args.find(
-    (a) => /^-[A-Za-z0-9]*[fF]/.test(a) || (/^--[a-z]/.test(a) && 'follow'.startsWith(a.slice(2).split('=')[0])),
-  );
-  return bad === undefined ? ALLOW : deny(`tail argument not allowed: ${bad}`);
-}
-
 function checkCmdlet(command: string, args: string[]): GuardDecision {
   const lower = command.toLowerCase();
   if (lower.includes('invoke-')) return deny('Invoke-* is not allowed');
@@ -114,7 +107,6 @@ export function decideGuard(toolName: string, command: string): GuardDecision {
   }
   if (POSIX_COMMANDS.has(first)) {
     if (first === 'git') return checkGit(args);
-    if (first === 'tail') return checkTail(args);
     return ALLOW;
   }
   if (CMDLETS.has(first.toLowerCase())) return checkCmdlet(cmd, args);
