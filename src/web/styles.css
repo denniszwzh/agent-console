@@ -1027,6 +1027,13 @@ textarea {
   background: var(--ok-soft);
   color: var(--ok);
   font-size: 0.875rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.delivery code {
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 900px) {

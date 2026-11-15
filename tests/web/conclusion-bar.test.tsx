@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { ConclusionBar } from '../../src/web/components/ConclusionBar.js';
 import { anchorOn, makeThread, makeUnit, renderInUnit } from './fixtures.js';
 
@@ -49,5 +49,31 @@ describe('ConclusionBar', () => {
     renderInUnit(<ConclusionBar />, unit);
     expect(screen.getByText(/結論會自動帶入主對話/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '送出結論' })).toHaveProperty('disabled', true);
+  });
+
+  describe('Codex delivery', () => {
+    const instruction = 'Read the review conclusions in C:/h/conclusions/u1.md and apply them.';
+    const codexUnit = (queued: boolean) => {
+      const unit = makeUnit({ agent: 'codex', status: 'submitted', delivery: { queued, instruction } });
+      unit.threads = [makeThread('t1', anchorOn(unit), { status: 'resolved', conclusion: 'Keep it.' })];
+      return unit;
+    };
+
+    it('always shows the copy button with the English instruction, and copies it', async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+      renderInUnit(<ConclusionBar />, codexUnit(false));
+      expect(screen.queryByText('已送入佇列。')).toBeNull();
+      expect(screen.getByText(instruction)).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: '複製' }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(instruction));
+      await screen.findByRole('button', { name: '已複製' });
+    });
+
+    it('also shows the queued notice when the queue accepted the message', () => {
+      renderInUnit(<ConclusionBar />, codexUnit(true));
+      expect(screen.getByText('已送入佇列。')).toBeTruthy();
+      expect(screen.getByRole('button', { name: '複製' })).toBeTruthy();
+    });
   });
 });

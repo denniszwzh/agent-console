@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
-import type { Config, ReviewUnit, Source } from '../../shared/types.js';
+import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { AgentKind, Config, ReviewUnit, Source } from '../../shared/types.js';
 import { splitBlocks } from '../../shared/blocks.js';
 import { findChangedFilesClaude } from '../transcript.js';
+import { findChangedFilesCodex } from '../rollout.js';
 import { takeSnapshot } from '../snapshot.js';
 import type { EventBus } from '../events.js';
 import type { UnitStore } from '../store.js';
@@ -22,8 +23,13 @@ export function registerHookRoutes(
 ): void {
   const { store, bus, config, forks } = deps;
 
-  app.post('/api/hooks/claude/stop', async (req, reply) => {
-    const body = (req.body ?? {}) as StopBody;
+  /** Shared Stop ingestion: validates the body, snapshots changed files, stales earlier open units. */
+  const ingestStop = (
+    agent: AgentKind,
+    findFiles: (transcriptPath: string, sessionId: string) => string[],
+    body: StopBody,
+    reply: FastifyReply,
+  ) => {
     const sessionId = body.session_id;
     const cwd = body.cwd;
     if (typeof sessionId !== 'string' || !sessionId || typeof cwd !== 'string' || !cwd) {
@@ -40,13 +46,11 @@ export function registerHookRoutes(
       content: message,
       blocks: splitBlocks(message, 'markdown'),
     };
-    const files = transcriptPath
-      ? findChangedFilesClaude(transcriptPath, sessionId).map((p) => takeSnapshot(p, cwd))
-      : [];
+    const files = transcriptPath ? findFiles(transcriptPath, sessionId).map((p) => takeSnapshot(p, cwd)) : [];
 
     const unit: ReviewUnit = {
       id: randomUUID(),
-      agent: 'claude',
+      agent,
       sessionId,
       cwd,
       createdAt: new Date().toISOString(),
@@ -72,7 +76,15 @@ export function registerHookRoutes(
     for (const prev of staled) bus.emit({ type: 'unit.updated', unitId: prev.id, sessionId });
     bus.emit({ type: 'unit.created', unitId: unit.id, sessionId });
     return { unitId: unit.id };
-  });
+  };
+
+  app.post('/api/hooks/claude/stop', async (req, reply) =>
+    ingestStop('claude', findChangedFilesClaude, (req.body ?? {}) as StopBody, reply),
+  );
+
+  app.post('/api/hooks/codex/stop', async (req, reply) =>
+    ingestStop('codex', (rollout) => findChangedFilesCodex(rollout), (req.body ?? {}) as StopBody, reply),
+  );
 
   app.get('/api/hooks/claude/prompt', async (req, reply) => {
     const session = (req.query as { session?: unknown }).session;

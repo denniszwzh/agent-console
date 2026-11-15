@@ -7,6 +7,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import type { UnitStore } from './store.js';
 import { EventBus } from './events.js';
+import { createCodexQueueRunner, type CodexQueueRunner } from '../agents/codex.js';
 import { registerHookRoutes } from './routes/hooks.js';
 import { registerUnitRoutes } from './routes/units.js';
 import type { ThreadEngine } from './threads.js';
@@ -26,6 +27,8 @@ export interface AppDeps {
   bus?: EventBus;
   engine?: ThreadEngine;
   config?: Config;
+  /** Sends a message to a Codex thread queue on submit; defaults to the real `codex queue`. */
+  codexQueue?: CodexQueueRunner;
   /** Directory of the built web UI; defaults to <package>/dist/web. */
   webRoot?: string;
 }
@@ -161,7 +164,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
 
     registerHookRoutes(api, { store, bus, config: deps.config ?? readConfig(), forks: deps.forks ?? deps.engine });
-    if (deps.engine) registerUnitRoutes(api, { engine: deps.engine, store, bus });
+    if (deps.engine) registerUnitRoutes(api, { engine: deps.engine, store, bus, codexQueue: deps.codexQueue ?? createCodexQueueRunner() });
   });
 
   // The built UI is public (it holds no data); every /api call still needs the token.

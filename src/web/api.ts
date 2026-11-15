@@ -58,7 +58,7 @@ export const api = {
   resolve: (threadId: string) => request<Thread>('POST', `/api/threads/${enc(threadId)}/resolve`),
   setConclusion: (threadId: string, conclusion: string | null) =>
     request<Thread>('PUT', `/api/threads/${enc(threadId)}/conclusion`, { conclusion }),
-  submit: (unitId: string) => request<{ bundle: string }>('POST', `/api/units/${enc(unitId)}/submit`),
+  submit: (unitId: string) => request<{ bundle: string; queued: boolean }>('POST', `/api/units/${enc(unitId)}/submit`),
   addFile: (unitId: string, path: string) => request<Source>('POST', `/api/units/${enc(unitId)}/files`, { path }),
 };
 

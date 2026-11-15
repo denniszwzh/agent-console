@@ -87,8 +87,32 @@ function DeliveryNotice({ unit }: { unit: ReviewUnit }) {
       </div>
     );
   }
-  // Task 12: the Codex copy button ("複製") is rendered here.
-  return null;
+  return <CodexDelivery unit={unit} />;
+}
+
+/** Codex has no prompt hook: the instruction is queued when possible and can always be copied. */
+function CodexDelivery({ unit }: { unit: ReviewUnit }) {
+  const [copied, setCopied] = useState(false);
+  const instruction = unit.delivery?.instruction;
+  if (!instruction) return null;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(instruction);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <div className="delivery">
+      {unit.delivery?.queued && <span>已送入佇列。</span>}
+      <span>貼到 Codex 對話即可套用結論：</span>
+      <code>{instruction}</code>
+      <button type="button" className="btn small" onClick={() => void copy()}>
+        {copied ? '已複製' : '複製'}
+      </button>
+    </div>
+  );
 }
 
 export function ConclusionBar() {

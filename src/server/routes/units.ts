@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Anchor } from '../../shared/types.js';
+import { codexInstruction, type CodexQueueRunner } from '../../agents/codex.js';
 import { buildConclusionBundle } from '../conclusion.js';
 import type { EventBus } from '../events.js';
 import { resolveUnitImage } from '../images.js';
@@ -39,9 +40,9 @@ function pathKey(p: string): string {
 
 export function registerUnitRoutes(
   app: FastifyInstance,
-  deps: { engine: ThreadEngine; store: UnitStore; bus: EventBus },
+  deps: { engine: ThreadEngine; store: UnitStore; bus: EventBus; codexQueue: CodexQueueRunner },
 ): void {
-  const { engine, store, bus } = deps;
+  const { engine, store, bus, codexQueue } = deps;
 
   const handle = async (reply: FastifyReply, fn: () => unknown) => {
     try {
@@ -161,7 +162,7 @@ export function registerUnitRoutes(
   });
 
   app.post('/api/units/:id/submit', async (req, reply) =>
-    handle(reply, () => {
+    handle(reply, async () => {
       const { id } = req.params as { id: string };
       const unit = store.get(id);
       if (!unit) throw new NotFoundError('unit not found');
@@ -169,12 +170,20 @@ export function registerUnitRoutes(
       const bundle = buildConclusionBundle(unit);
       const dir = path.join(dataDir(), 'conclusions');
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, `${id}.md`), bundle);
+      const file = path.resolve(dir, `${id}.md`);
+      fs.writeFileSync(file, bundle);
+      let queued = false;
+      if (unit.agent === 'codex') {
+        // Best effort: the UI always offers a copy button too; a queue failure never fails the submit.
+        const instruction = codexInstruction(file);
+        queued = await codexQueue(unit.sessionId, instruction).catch(() => false);
+        unit.delivery = { queued, instruction };
+      }
       unit.status = 'submitted';
       unit.delivered = false;
       store.save(unit);
       bus.emit({ type: 'unit.updated', unitId: id, sessionId: unit.sessionId });
-      return { bundle };
+      return { bundle, queued };
     }),
   );
 }

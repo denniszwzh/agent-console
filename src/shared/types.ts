@@ -71,6 +71,8 @@ export interface ReviewUnit {
   threads: Thread[];
   status: UnitStatus;
   delivered: boolean;
+  /** Codex only: how a submitted unit was handed back (set at submit). */
+  delivery?: { queued: boolean; instruction: string };
   warnings: { at: string; threadId: string; paths: string[] }[];
 }
 

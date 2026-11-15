@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { addHooks, assertRecognisable, removeHooks } from './settings-merge.js';
+import { addCodexHooks, addHooks, assertRecognisable, removeHooks } from './settings-merge.js';
 import { start } from '../server/main.js';
 import { ensureToken, readConfig } from '../server/paths.js';
 
@@ -13,6 +13,7 @@ const USAGE = `Usage: agent-console [install | uninstall]
 
   (no command)  start the server and open the browser
   install       add the Stop / UserPromptSubmit hooks to ~/.claude/settings.json
+                and the Stop hook to ~/.codex/hooks.json (if ~/.codex exists)
   uninstall     remove the hooks added by install`;
 
 function readSettings(file: string): object {
@@ -79,6 +80,58 @@ export function hookCommands(): { Stop: string; UserPromptSubmit: string } {
   };
 }
 
+export function codexHookCommands(): { Stop: string } {
+  return { Stop: `node "${fileURLToPath(new URL('../hooks/codex-stop.js', import.meta.url))}"` };
+}
+
+export const CODEX_TRUST_NOTICE =
+  'Codex skips hooks it has not been told to trust. Open the Codex TUI and run /hooks once to review and trust the Agent Console Stop hook; until then it will not fire.';
+
+export interface InstallTargets {
+  claudeSettings: string;
+  /** The Codex home directory (hooks.json lives inside it). */
+  codexDir: string;
+}
+
+export function defaultTargets(): InstallTargets {
+  return {
+    claudeSettings: path.join(os.homedir(), '.claude', 'settings.json'),
+    codexDir: process.env.CODEX_HOME || path.join(os.homedir(), '.codex'),
+  };
+}
+
+/** Claude first, then Codex; each change is confirmed separately. Codex is skipped when its directory is missing. */
+export async function runInstall(
+  t: InstallTargets,
+  confirm: (q: string) => Promise<boolean> = askYesNo,
+  log: (s: string) => void = console.log,
+): Promise<void> {
+  const cmds = hookCommands();
+  const codexCmds = codexHookCommands();
+  assertRecognisable(cmds);
+  assertRecognisable(codexCmds);
+  await applyChange(t.claudeSettings, (s) => addHooks(s, cmds), confirm, log);
+  if (!fs.existsSync(t.codexDir)) {
+    log(`Skipping Codex: ${t.codexDir} does not exist.`);
+    return;
+  }
+  const changed = await applyChange(path.join(t.codexDir, 'hooks.json'), (s) => addCodexHooks(s, codexCmds), confirm, log);
+  if (changed) log(CODEX_TRUST_NOTICE);
+}
+
+export async function runUninstall(
+  t: InstallTargets,
+  confirm: (q: string) => Promise<boolean> = askYesNo,
+  log: (s: string) => void = console.log,
+): Promise<void> {
+  await applyChange(t.claudeSettings, removeHooks, confirm, log);
+  if (!fs.existsSync(t.codexDir)) {
+    log(`Skipping Codex: ${t.codexDir} does not exist.`);
+    return;
+  }
+  await applyChange(path.join(t.codexDir, 'hooks.json'), removeHooks, confirm, log);
+}
+
 function openBrowser(url: string): void {
   const [cmd, args]: [string, string[]] =
     process.platform === 'win32'
@@ -95,13 +148,10 @@ function openBrowser(url: string): void {
 
 async function main(): Promise<void> {
   const sub = process.argv[2];
-  const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
   if (sub === 'install') {
-    const cmds = hookCommands();
-    assertRecognisable(cmds);
-    await applyChange(settingsPath, (s) => addHooks(s, cmds));
+    await runInstall(defaultTargets());
   } else if (sub === 'uninstall') {
-    await applyChange(settingsPath, removeHooks);
+    await runUninstall(defaultTargets());
   } else if (sub === undefined) {
     await start();
     const url = `http://127.0.0.1:${readConfig().port}/auth?token=${ensureToken()}`;
