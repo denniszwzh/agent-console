@@ -17,7 +17,9 @@ export function buildClaudeArgs(req: RunRequest, guardSettingsPath: string): str
     '--output-format', 'stream-json',
     '--verbose',
     '--tools', 'Read,Grep,Glob,Bash,PowerShell',
-    '--disallowedTools', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
+    // No --disallowedTools: removing tools from the definitions changes the request prefix, so the
+    // fork could not reuse the main session's prompt cache. The --settings guard hook runs for every
+    // tool and denies anything but Read/Grep/Glob and checked shell commands.
     '--strict-mcp-config',
     '--permission-mode', 'default',
     '--settings', guardSettingsPath,
@@ -86,7 +88,8 @@ function writeGuardSettings(guardScript: string): string {
     // Flag settings outrank project and local settings: a repo's "disableAllHooks": true must not disable the guard.
     disableAllHooks: false,
     hooks: {
-      PreToolUse: [{ matcher: 'Bash|PowerShell', hooks: [{ type: 'command', command: `node "${script}"` }] }],
+      // Every tool: the guard allows only the read-only tools and checked shell commands.
+      PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: `node "${script}"` }] }],
     },
   };
   fs.writeFileSync(file, JSON.stringify(settings, null, 2));

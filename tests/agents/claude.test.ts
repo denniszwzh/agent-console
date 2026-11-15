@@ -35,8 +35,9 @@ describe('buildClaudeArgs', () => {
     expect(a).toContain('--strict-mcp-config');
     expect(a).not.toContain('--mcp-config');
     expect(a[a.indexOf('--tools') + 1]).toBe('Read,Grep,Glob,Bash,PowerShell');
-    const i = a.indexOf('--disallowedTools');
-    expect(a.slice(i + 1, i + 5)).toEqual(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+    // Removing tools changes the request prefix and defeats the main session's prompt cache;
+    // write tools are blocked by the --settings guard hook instead.
+    expect(a).not.toContain('--disallowedTools');
     expect(a[a.indexOf('--settings') + 1]).toBe('g.json');
     expect(a[a.indexOf('--permission-mode') + 1]).toBe('default');
   });
@@ -50,7 +51,6 @@ describe('buildClaudeArgs', () => {
     expect(buildClaudeArgs(req, 'g.json')).toEqual([
       '-p', '--resume', 'parent-1', '--fork-session', '--output-format', 'stream-json', '--verbose',
       '--tools', 'Read,Grep,Glob,Bash,PowerShell',
-      '--disallowedTools', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
       '--strict-mcp-config', '--permission-mode', 'default', '--settings', 'g.json',
       '--setting-sources', 'project,local',
     ]);
@@ -153,7 +153,8 @@ describe('createClaudeAdapter.run', () => {
   it('writes guard-settings.json with the PreToolUse hook', () => {
     fake('');
     const s = JSON.parse(fs.readFileSync(path.join(home, 'guard-settings.json'), 'utf8'));
-    expect(s.hooks.PreToolUse[0].matcher).toBe('Bash|PowerShell');
+    // Every tool goes through the guard, not only the shells.
+    expect(s.hooks.PreToolUse[0].matcher).toBe('*');
     expect(s.hooks.PreToolUse[0].hooks[0]).toEqual({ type: 'command', command: `node "${guardStub.split(path.sep).join('/')}"` });
   });
 

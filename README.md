@@ -95,10 +95,17 @@ instruction with a copy button; paste it into Codex if the next turn did not pic
 
 ## Read-only forks
 
-- Claude forks run with `--tools Read,Grep,Glob,Bash,PowerShell`, write tools disallowed, `--strict-mcp-config`,
-  `--permission-mode default`, `--setting-sources project,local` (your user-level hooks and plugins stay out) and a
-  `--settings` file with a PreToolUse guard that only allows a small read-only command list (and forces
-  `disableAllHooks: false`, so a repository cannot switch the guard off).
+- Claude forks run with `--tools Read,Grep,Glob,Bash,PowerShell`, `--strict-mcp-config`, `--permission-mode default`,
+  `--setting-sources project,local` (your user-level hooks and plugins stay out) and a `--settings` file with a
+  PreToolUse guard for every tool: Read, Grep and Glob are left to Claude Code's normal permission checks (so a read
+  outside the project folder is refused) except UNC and device paths, which are denied; Bash and PowerShell may run
+  only a small read-only command list; every other tool is denied (the file also forces `disableAllHooks: false`, so
+  a repository cannot switch the guard off).
+- Forks keep the main session's tool definitions on purpose (no `--disallowedTools`): removing a tool changes the
+  start of the request, so the fork could not reuse the main session's prompt cache and would pay to re-cache the
+  whole conversation. `--tools` makes Claude Code refuse the other tools without changing the definitions, and the
+  guard hook blocks them as a second layer. `scripts/measure-fork-cache.mjs` measures the cache reuse and probes the
+  guard against the real CLI (it costs real tokens).
 - Codex forks run with `-s read-only`, `--disable plugins`, `--disable apps`, `-c features.hooks=false` and every
   configured MCP server disabled by name.
 - Before and after every run the server fingerprints `git status`; any change shows as a red warning in the panel.

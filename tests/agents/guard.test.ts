@@ -295,12 +295,12 @@ describe('decideGuard round 4 (tail removed from the allowlist)', () => {
 });
 
 describe('guardFromStdin', () => {
-  const decision = (raw: string) => guardFromStdin(raw).hookSpecificOutput;
+  const decision = (raw: string) => guardFromStdin(raw)!.hookSpecificOutput;
 
   it('allows a safe Bash command', () => {
     const out = guardFromStdin(JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls' } }));
-    expect(out.hookSpecificOutput.hookEventName).toBe('PreToolUse');
-    expect(out.hookSpecificOutput.permissionDecision).toBe('allow');
+    expect(out!.hookSpecificOutput.hookEventName).toBe('PreToolUse');
+    expect(out!.hookSpecificOutput.permissionDecision).toBe('allow');
   });
 
   it('denies a write via PowerShell', () => {
@@ -316,4 +316,78 @@ describe('guardFromStdin', () => {
       expect(d.permissionDecisionReason.length).toBeGreaterThan(0);
     },
   );
+});
+
+// The fork keeps the parent's tool definitions (so the prompt cache prefix matches); the hook is
+// the only thing that decides which tools may actually run, so it must cover every tool.
+describe('guardFromStdin tool allowlist', () => {
+  const decide = (tool_name: unknown, tool_input: unknown = {}) =>
+    guardFromStdin(JSON.stringify({ tool_name, tool_input }))?.hookSpecificOutput;
+
+  // No decision means Claude Code's normal permission flow still applies (in -p default mode a
+  // read outside the working directory is refused); an explicit "allow" would skip it.
+  it.each([
+    ['Read', { file_path: 'C:/repo/docs/spec.md' }],
+    ['Read', { file_path: 'docs\\spec.md' }],
+    ['Grep', { pattern: 'TODO', path: 'src' }],
+    ['Glob', { pattern: '**/*.md' }],
+  ])('leaves the read-only tool %s to the normal permission flow', (tool, input) => {
+    expect(guardFromStdin(JSON.stringify({ tool_name: tool, tool_input: input }))).toBeNull();
+  });
+
+  it.each([
+    ['Read', { file_path: '\\\\attacker\\share\\x' }],
+    ['Read', { file_path: '//attacker/share/x' }],
+    ['Read', { file_path: '\\\\?\\C:\\secret' }],
+    ['Read', { file_path: '\\\\.\\pipe\\x' }],
+    ['Read', { file_path: '\\/attacker/share' }],
+    ['Grep', { pattern: 'x', path: '\\\\attacker\\share' }],
+    ['Glob', { pattern: '//attacker/share/**' }],
+    ['Glob', { pattern: '*.md', path: '\\\\attacker\\share' }],
+  ])('denies %s on a UNC or device path %j', (tool, input) => {
+    const d = decide(tool, input);
+    expect(d?.permissionDecision).toBe('deny');
+    expect(d?.permissionDecisionReason).toContain('agent-console read-only guard');
+  });
+
+  it('denies a read-only tool whose path fields are not strings', () => {
+    expect(decide('Read', { file_path: ['x'] })?.permissionDecision).toBe('deny');
+  });
+
+  it.each([
+    'Write',
+    'Edit',
+    'MultiEdit',
+    'NotebookEdit',
+    'Agent',
+    'Task',
+    'Skill',
+    'Artifact',
+    'WebFetch',
+    'WebSearch',
+    'ToolSearch',
+    'ScheduleWakeup',
+    'AskUserQuestion',
+    'SendFeedback',
+    'mcp__plugin_firecrawl_firecrawl__firecrawl_scrape',
+    'mcp__github__create_issue',
+    'SomeFutureTool',
+    'read',
+    'bash',
+  ])('denies %s', (tool) => {
+    const d = decide(tool, { file_path: 'x', content: 'y', command: 'ls', url: 'https://example.com' });
+    expect(d.permissionDecision).toBe('deny');
+    expect(d.permissionDecisionReason).toContain('agent-console read-only guard');
+  });
+
+  it('still routes Bash and PowerShell through the command checks', () => {
+    expect(decide('Bash', { command: 'git log -5' })?.permissionDecision).toBe('allow');
+    expect(decide('Bash', { command: 'rm -rf src' })?.permissionDecision).toBe('deny');
+    expect(decide('PowerShell', { command: 'Get-Content docs\\spec.md' })?.permissionDecision).toBe('allow');
+    expect(decide('PowerShell', { command: 'Remove-Item src' })?.permissionDecision).toBe('deny');
+  });
+
+  it.each([null, 5, '', ['Read']])('fails closed on tool_name %j', (tool) => {
+    expect(decide(tool)?.permissionDecision).toBe('deny');
+  });
 });
