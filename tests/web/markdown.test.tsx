@@ -29,6 +29,20 @@ describe('Markdown', () => {
     expect(img.getAttribute('src')).toMatch(/^data:image\/svg\+xml;base64,/);
   });
 
+  it('a diagram with HTML line breaks in its labels becomes an image the browser can load', async () => {
+    mermaidMock.render.mockResolvedValueOnce({
+      svg:
+        '<svg xmlns="http://www.w3.org/2000/svg" style="max-width: 120px;"><foreignObject><div xmlns="http://www.w3.org/1999/xhtml"><p>CLI<br>主工作階段</p></div></foreignObject></svg>',
+    });
+    render(<Markdown content={'```mermaid\nflowchart TB\n  A["CLI<br/>主工作階段"]\n```'} />);
+    const img = await screen.findByRole('img', { name: 'Mermaid 圖表' });
+    const b64 = img.getAttribute('src')!.split(',')[1];
+    const svg = new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
+    expect(new DOMParser().parseFromString(svg, 'image/svg+xml').getElementsByTagName('parsererror')).toHaveLength(0);
+    expect(svg).toContain('<br />');
+    expect(img.style.width).toBe('120px');
+  });
+
   it('shows source and error when mermaid fails', async () => {
     mermaidMock.render.mockRejectedValueOnce(new Error('Parse error on line 1'));
     render(<Markdown content={'```mermaid\nnot a graph\n```'} />);

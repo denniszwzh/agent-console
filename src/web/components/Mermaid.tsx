@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react';
-import { svgDataUrl } from '../svg.js';
+import { svgDataUrl, wellFormedSvg } from '../svg.js';
 
 type MermaidApi = typeof import('mermaid').default;
 let mermaidReady: Promise<MermaidApi> | null = null;
@@ -35,7 +35,7 @@ export function Mermaid({ code }: { code: string }) {
     loadMermaid()
       .then((m) => m.render(id, code))
       .then(({ svg }) => {
-        if (live) setState({ kind: 'ok', svg });
+        if (live) setState({ kind: 'ok', svg: wellFormedSvg(svg) });
       })
       .catch((e: unknown) => {
         if (live) setState({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
