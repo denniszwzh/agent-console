@@ -102,4 +102,19 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: '隱藏側欄' }));
     expect(hidden).toBe(true);
   });
+
+  it('shows the session title with the folder below', () => {
+    const base = { sessionId: 's1', agent: 'claude' as const, cwd: 'C:\\p\\stock', lastActivity: '2026-11-16T10:00:00.000Z' };
+    const { container, rerender } = render(
+      <Sidebar sessions={[{ ...base, title: 'K棒反向交易功能', titleSource: 'agent' }]} unitsBySession={{}} selectedSession={null} selectedUnit={null} onSelect={() => {}} />,
+    );
+    const title = container.querySelector('.session-project')!;
+    expect(title.textContent).toBe('K棒反向交易功能');
+    expect(title.classList.contains('untitled')).toBe(false);
+    expect(container.querySelector('.session-meta')!.textContent).toContain('stock');
+    rerender(
+      <Sidebar sessions={[{ ...base, title: '幫我看 README', titleSource: 'prompt' }]} unitsBySession={{}} selectedSession={null} selectedUnit={null} onSelect={() => {}} />,
+    );
+    expect(container.querySelector('.session-project')!.classList.contains('untitled')).toBe(true);
+  });
 });

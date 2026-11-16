@@ -294,6 +294,16 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A first prompt standing in for a missing session name. */
+.session-project.untitled {
+  font-weight: 500;
+  color: var(--text-soft);
+}
+.session-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .session-meta,
 .unit-btn-meta {
   font-size: 0.75rem;

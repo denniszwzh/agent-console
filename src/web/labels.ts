@@ -1,4 +1,4 @@
-import type { ThreadStatus, UnitStatus } from '../shared/types.js';
+import type { SessionSummary, ThreadStatus, UnitStatus } from '../shared/types.js';
 
 export const THREAD_STATUS_LABELS: Record<ThreadStatus, string> = {
   draft: '草稿',
@@ -31,4 +31,30 @@ export function firstLine(text: string, max = 60): string {
   const line = text.split(/\r?\n/).find((l) => l.trim()) ?? '';
   const clean = line.replace(/^\s*(#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)/, '').trim();
   return clean.length > max ? `${clean.slice(0, max)}…` : clean;
+}
+
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+/** "剛剛", "N 分鐘前", "N 小時前", "N 天前"; the date itself past 30 days; '' for an invalid time. */
+export function formatRelative(iso: string, nowMs: number): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const diff = Math.max(0, nowMs - t);
+  if (diff < MINUTE) return '剛剛';
+  if (diff < HOUR) return `${Math.floor(diff / MINUTE)} 分鐘前`;
+  if (diff < DAY) return `${Math.floor(diff / HOUR)} 小時前`;
+  if (diff < 30 * DAY) return `${Math.floor(diff / DAY)} 天前`;
+  return formatTime(iso);
+}
+
+/** The session's name, or its folder name when the agent gave it none. */
+export function sessionTitle(s: SessionSummary): string {
+  return s.title ?? basename(s.cwd);
+}
+
+/** Last time anything happened in the session (transcript change, else latest reply). */
+export function lastChanged(s: SessionSummary): string {
+  return s.lastModified ?? s.lastActivity;
 }

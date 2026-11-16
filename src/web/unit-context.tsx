@@ -75,6 +75,18 @@ export function isOpenThread(t: Thread): boolean {
   return t.status !== 'resolved' && t.status !== 'expired';
 }
 
+/** Unfinished threads across a session's units that are still under review. */
+export function openThreadCount(units: ReviewUnit[] | undefined): number {
+  if (!units) return 0;
+  return units.filter((u) => u.status === 'open').reduce((n, u) => n + u.threads.filter(isOpenThread).length, 0);
+}
+
+/** Threads across a session's units whose fork is answering right now. */
+export function answeringThreadCount(units: ReviewUnit[] | undefined): number {
+  if (!units) return 0;
+  return units.reduce((n, u) => n + u.threads.filter((t) => t.status === 'answering').length, 0);
+}
+
 /** Run an action from an event handler; its failure has already been reported. */
 export function fire(p: Promise<unknown>): void {
   p.catch(() => {});

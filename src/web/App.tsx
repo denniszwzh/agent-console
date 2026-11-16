@@ -78,6 +78,8 @@ export function App() {
       (e) => {
         if (e.type === 'activity.updated') {
           schedule('activity', loadActivity);
+          // Names and last-change times come with the session list.
+          schedule('sessions', loadSessions);
           return;
         }
         schedule('sessions', loadSessions);

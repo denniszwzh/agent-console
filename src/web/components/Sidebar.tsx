@@ -1,7 +1,7 @@
 import type { ReviewUnit } from '../../shared/types.js';
 import type { SessionSummary } from '../api.js';
-import { UNIT_STATUS_LABELS, basename, firstLine, formatTime } from '../labels.js';
-import { isOpenThread } from '../unit-context.js';
+import { UNIT_STATUS_LABELS, basename, firstLine, formatTime, lastChanged, sessionTitle } from '../labels.js';
+import { openThreadCount } from '../unit-context.js';
 
 interface Props {
   sessions: SessionSummary[];
@@ -15,13 +15,6 @@ interface Props {
   onHide?(): void;
   /** Rendered as an overlay drawer (portrait / narrow layout). */
   drawer?: boolean;
-}
-
-function openThreadCount(units: ReviewUnit[] | undefined): number {
-  if (!units) return 0;
-  return units
-    .filter((u) => u.status === 'open')
-    .reduce((n, u) => n + u.threads.filter(isOpenThread).length, 0);
 }
 
 export function Sidebar({ sessions, responding, unitsBySession, selectedSession, selectedUnit, onSelect, onHide, drawer }: Props) {
@@ -54,9 +47,9 @@ export function Sidebar({ sessions, responding, unitsBySession, selectedSession,
               >
                 <span className={`agent-dot agent-${s.agent}`} aria-hidden="true" />
                 <span className="session-name">
-                  <span className="session-project">{basename(s.cwd)}</span>
+                  <span className={`session-project${s.titleSource === 'prompt' ? ' untitled' : ''}`}>{sessionTitle(s)}</span>
                   <span className="session-meta">
-                    {s.agent} · {formatTime(s.lastActivity)}
+                    {basename(s.cwd)} · {s.agent} · {formatTime(lastChanged(s))}
                   </span>
                 </span>
                 {responding?.has(s.sessionId) && (
