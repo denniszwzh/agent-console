@@ -19,7 +19,31 @@ function isRejection(output: unknown): boolean {
 }
 
 /**
+ * Paths from completed `FileChange` items (`event_msg` / `item_completed`), in first-seen order.
+ * Codex records one per applied patch with absolute paths, also when the patch was applied from
+ * code mode (an `exec` tool running JavaScript that calls `tools.apply_patch`), where no top-level
+ * `apply_patch` call exists. A successful top-level `apply_patch` gets one too (same call_id; seen
+ * in real 0.167 rollouts), so preferring these items loses nothing. A move contributes its destination.
+ */
+function fileChangePaths(turn: Entry[]): string[] {
+  const seen = new Set<string>();
+  for (const e of turn) {
+    const item = e.type === 'event_msg' && e.payload?.type === 'item_completed' ? e.payload.item : undefined;
+    if (!item || item.type !== 'FileChange' || item.status !== 'completed') continue;
+    const changes = item.changes;
+    if (!changes || typeof changes !== 'object') continue;
+    for (const [file, change] of Object.entries(changes as Record<string, { move_path?: unknown } | null>)) {
+      const moved = change?.move_path;
+      seen.add(typeof moved === 'string' && moved ? moved : file);
+    }
+  }
+  return [...seen];
+}
+
+/**
  * Files edited through `apply_patch` during the last turn of a Codex rollout, in first-seen order.
+ * Structured `FileChange` items are used when the turn has any; otherwise the patch text of
+ * top-level `apply_patch` calls is parsed (older rollouts).
  * The last turn starts at the last `task_started` event (a queued message and the prompt share one
  * turn); without one it starts after the last user message. Calls whose output reports a rejection
  * are skipped. Shell-driven edits are not recorded structurally and are not detected here.
@@ -44,6 +68,8 @@ export function findChangedFilesCodex(rolloutPath: string): string[] {
       }
     }
     const turn = entries.slice(start + 1);
+    const structured = fileChangePaths(turn);
+    if (structured.length > 0) return structured;
     const rejected = new Set<string>();
     for (const e of turn) {
       const p = e.payload;

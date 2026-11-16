@@ -42,6 +42,29 @@ describe('findChangedFilesCodex', () => {
     expect(findChangedFilesCodex(file)).toEqual(['a.txt', 'src/b.ts', 'src/c.ts', 'old.md']);
   });
 
+  it('reads FileChange items for a patch applied from code mode (real fixture, trimmed)', () => {
+    const codeMode = path.join(import.meta.dirname, '..', 'fixtures', 'codex-rollout-code-mode-file-change.jsonl');
+    expect(findChangedFilesCodex(codeMode)).toEqual(['C:\\repo\\docs\\design.md']);
+  });
+
+  it('prefers FileChange items: completed only, move destination, last turn only, no double count with patch text', () => {
+    const change = (status: string, changes: object) =>
+      rec('event_msg', { type: 'item_completed', item: { type: 'FileChange', id: 'x', status, changes } });
+    const file = write([
+      started(),
+      user('first'),
+      change('completed', { 'C:\\r\\old.md': { type: 'add' } }),
+      started(),
+      user('second'),
+      patch('c1', '*** Add File: a.md\n+x'),
+      change('completed', { 'C:\\r\\a.md': { type: 'add', content: 'x' } }),
+      change('failed', { 'C:\\r\\nope.md': { type: 'add' } }),
+      change('completed', { 'C:\\r\\b.ts': { type: 'update', move_path: 'C:\\r\\c.ts' }, 'C:\\r\\d.ts': { type: 'update', move_path: null } }),
+      change('completed', { 'C:\\r\\a.md': { type: 'update' } }),
+    ]);
+    expect(findChangedFilesCodex(file)).toEqual(['C:\\r\\a.md', 'C:\\r\\c.ts', 'C:\\r\\d.ts']);
+  });
+
   it('only scans the last turn', () => {
     const file = write([
       started(),
