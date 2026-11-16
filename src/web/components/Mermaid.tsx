@@ -1,26 +1,44 @@
-import { useEffect, useId, useState } from 'react';
-import { svgDataUrl, wellFormedSvg } from '../svg.js';
+import { useEffect, useId, useState, useSyncExternalStore } from 'react';
+import { wellFormedSvg } from '../svg.js';
+import { DiagramViewer } from './DiagramViewer.js';
 
 type MermaidApi = typeof import('mermaid').default;
 let mermaidReady: Promise<MermaidApi> | null = null;
 
-function prefersDark(): boolean {
-  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches;
+const DARK_QUERY = '(prefers-color-scheme: dark)';
+
+function darkQuery(): MediaQueryList | null {
+  return typeof window.matchMedia === 'function' ? window.matchMedia(DARK_QUERY) : null;
+}
+
+/** Follows the OS colour scheme, so diagrams switch theme together with the page. */
+function usePrefersDark(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const q = darkQuery();
+      q?.addEventListener?.('change', onChange);
+      return () => q?.removeEventListener?.('change', onChange);
+    },
+    () => darkQuery()?.matches ?? false,
+  );
 }
 
 // Mermaid is large, so it is loaded on first use (still from the local bundle).
 function loadMermaid(): Promise<MermaidApi> {
-  mermaidReady ??= import('mermaid').then(({ default: mermaid }) => {
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      suppressErrorRendering: true,
-      theme: prefersDark() ? 'dark' : 'default',
-      fontFamily: 'system-ui, "Segoe UI", "Microsoft JhengHei", sans-serif',
-    });
-    return mermaid;
-  });
+  mermaidReady ??= import('mermaid').then(({ default: mermaid }) => mermaid);
   return mermaidReady;
+}
+
+function configFor(dark: boolean): Parameters<MermaidApi['initialize']>[0] {
+  return {
+    startOnLoad: false,
+    securityLevel: 'strict',
+    suppressErrorRendering: true,
+    // The 'neo' look and themes: flatter shapes and calmer colours than the classic defaults.
+    look: 'neo',
+    theme: dark ? 'neo-dark' : 'neo',
+    fontFamily: 'system-ui, "Segoe UI", "Microsoft JhengHei", sans-serif',
+  };
 }
 
 type State = { kind: 'loading' } | { kind: 'ok'; svg: string } | { kind: 'error'; message: string };
@@ -28,12 +46,17 @@ type State = { kind: 'loading' } | { kind: 'ok'; svg: string } | { kind: 'error'
 export function Mermaid({ code }: { code: string }) {
   const id = `mmd-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const [state, setState] = useState<State>({ kind: 'loading' });
+  const dark = usePrefersDark();
 
   useEffect(() => {
     let live = true;
     setState({ kind: 'loading' });
     loadMermaid()
-      .then((m) => m.render(id, code))
+      .then((m) => {
+        // Set right before each render: the theme can change between renders.
+        m.initialize(configFor(dark));
+        return m.render(id, code);
+      })
       .then(({ svg }) => {
         if (live) setState({ kind: 'ok', svg: wellFormedSvg(svg) });
       })
@@ -43,22 +66,9 @@ export function Mermaid({ code }: { code: string }) {
     return () => {
       live = false;
     };
-  }, [id, code]);
+  }, [id, code, dark]);
 
-  if (state.kind === 'ok') {
-    // Mermaid sizes the SVG with width=100% plus an inline max-width; keep that natural width.
-    const natural = /max-width:\s*([\d.]+)px/.exec(state.svg)?.[1];
-    // Rendered through <img>: the SVG cannot run scripts or touch the page.
-    return (
-      <figure className="mermaid">
-        <img
-          src={svgDataUrl(state.svg)}
-          alt="Mermaid 圖表"
-          style={natural ? { width: `${natural}px`, maxWidth: '100%' } : undefined}
-        />
-      </figure>
-    );
-  }
+  if (state.kind === 'ok') return <DiagramViewer svg={state.svg} code={code} />;
   if (state.kind === 'error') {
     return (
       <div className="mermaid-error">

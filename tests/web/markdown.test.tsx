@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 
 const mermaidMock = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -24,7 +24,7 @@ describe('Markdown', () => {
     render(<Markdown content={'```mermaid\ngraph TD; A-->B\n```'} />);
     await waitFor(() => expect(mermaidMock.render).toHaveBeenCalled());
     expect(mermaidMock.render.mock.calls[0][1]).toBe('graph TD; A-->B');
-    expect(mermaidMock.initialize).toHaveBeenCalledWith(expect.objectContaining({ securityLevel: 'strict' }));
+    expect(mermaidMock.initialize).toHaveBeenCalledWith(expect.objectContaining({ securityLevel: 'strict', look: 'neo', theme: 'neo' }));
     const img = await screen.findByRole('img', { name: 'Mermaid 圖表' });
     expect(img.getAttribute('src')).toMatch(/^data:image\/svg\+xml;base64,/);
   });
@@ -41,6 +41,28 @@ describe('Markdown', () => {
     expect(new DOMParser().parseFromString(svg, 'image/svg+xml').getElementsByTagName('parsererror')).toHaveLength(0);
     expect(svg).toContain('<br />');
     expect(img.style.width).toBe('120px');
+  });
+
+  it('uses the dark neo theme in dark mode and re-renders when the OS scheme changes', async () => {
+    let dark = true;
+    const listeners = new Set<() => void>();
+    vi.stubGlobal('matchMedia', (q: string) => ({
+      get matches() {
+        return q.includes('dark') && dark;
+      },
+      addEventListener: (_: string, l: () => void) => listeners.add(l),
+      removeEventListener: (_: string, l: () => void) => listeners.delete(l),
+    }));
+    try {
+      mermaidMock.initialize.mockClear();
+      render(<Markdown content={'```mermaid\ngraph TD; X-->Y\n```'} />);
+      await waitFor(() => expect(mermaidMock.initialize).toHaveBeenLastCalledWith(expect.objectContaining({ theme: 'neo-dark' })));
+      dark = false;
+      act(() => listeners.forEach((l) => l()));
+      await waitFor(() => expect(mermaidMock.initialize).toHaveBeenLastCalledWith(expect.objectContaining({ theme: 'neo' })));
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('shows source and error when mermaid fails', async () => {

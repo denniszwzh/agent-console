@@ -796,6 +796,134 @@ textarea {
 .svg-figure img {
   max-width: 100%;
 }
+
+/* Mermaid viewer: zoom, pan, full screen. The frame scrolls; the toolbar shows on hover or focus. */
+.mermaid {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+}
+.diagram {
+  position: relative;
+}
+/* Top left: the block's ask button sits at the top right (inside the block in thread answers). */
+.diagram-toolbar {
+  position: absolute;
+  top: 0.4rem;
+  left: 0.4rem;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.mermaid:hover .diagram-toolbar,
+.diagram-toolbar:focus-within,
+.diagram-full .diagram-toolbar {
+  opacity: 1;
+}
+@media (hover: none) {
+  .diagram-toolbar {
+    opacity: 1;
+  }
+}
+.diagram-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.9rem;
+  height: 1.9rem;
+  padding: 0 0.35rem;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-soft);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+}
+.diagram-btn:hover:not(:disabled),
+.diagram-btn[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.diagram-btn:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.diagram-zoom {
+  min-width: 3.2rem;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+/* Inline, the frame grows with the diagram (no height cap); only a zoomed-in width scrolls. */
+.diagram-frame {
+  position: relative; /* offset parent of the image, for zoom anchoring */
+  display: flex;
+  padding: 1rem;
+  overflow: auto;
+}
+.diagram-frame:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.diagram-frame img {
+  flex: none;
+  /* Auto margins centre the image without making overflow unreachable. */
+  margin: auto;
+}
+.diagram-frame.pannable {
+  cursor: grab;
+}
+.diagram-frame.panning {
+  cursor: grabbing;
+  user-select: none;
+}
+.diagram-source {
+  margin: 0;
+  padding: 2.8rem 1rem 1rem;
+  overflow: auto;
+  background: var(--code-bg);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  text-align: left;
+}
+.diagram-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  padding: 2rem;
+  background: rgb(0 0 0 / 0.55);
+}
+.diagram-full {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.diagram-full .diagram-frame {
+  flex: 1;
+  min-height: 0;
+  /* A scrollbar appearing must not shrink the box that fit measures (it would flicker). */
+  scrollbar-gutter: stable both-edges;
+}
+.diagram-full .diagram-toolbar {
+  left: auto;
+  right: 0.4rem;
+}
 .mermaid-loading {
   padding: 1rem;
   color: var(--muted);
