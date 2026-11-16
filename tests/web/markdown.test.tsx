@@ -56,4 +56,20 @@ describe('Markdown', () => {
     ]);
     expect(container.textContent).toContain('remote');
   });
+
+  it('keeps the rendered code block and link DOM across re-renders (a text selection survives)', () => {
+    const content = '```ts\nconst a = 1;\n```\n\n[link](https://example.com)';
+    const { container, rerender } = render(<Markdown content={content} imageUrl={(p) => `/a/${p}`} />);
+    const pre = container.querySelector('pre');
+    const link = container.querySelector('a');
+    rerender(<Markdown content={content} imageUrl={(p) => `/b/${p}`} />);
+    expect(container.querySelector('pre')).toBe(pre);
+    expect(container.querySelector('a')).toBe(link);
+  });
+
+  it('uses the latest imageUrl after a re-render', () => {
+    const { container, rerender } = render(<Markdown content={'![x](img/a.png)'} imageUrl={(p) => `/a/${p}`} />);
+    rerender(<Markdown content={'![x](img/a.png)'} imageUrl={(p) => `/b/${p}`} />);
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('/b/img/a.png');
+  });
 });

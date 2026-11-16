@@ -1,3 +1,4 @@
+import { createContext, useContext } from 'react';
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { isLocalImagePath } from '../../shared/images.js';
@@ -55,47 +56,63 @@ function codeLanguage(code: any): string | undefined {
 const urlTransform = (url: string, key: string, node: { tagName: string }) =>
   node.tagName === 'img' && key === 'src' ? null : defaultUrlTransform(url);
 
-export function Markdown({ content, imageUrl }: Props) {
-  const components: Components = {
-    pre({ node }) {
-      const code = node?.children?.[0] as any;
-      if (!code || code.type !== 'element' || code.tagName !== 'code') return <pre>{hastText(node)}</pre>;
-      const text = hastText(code).replace(/\n$/, '');
-      const lang = codeLanguage(code);
-      if (lang === 'mermaid') return <Mermaid code={text} />;
-      if (lang === 'svg') {
-        return (
-          <figure className="svg-figure">
-            <img src={svgDataUrl(text)} alt="SVG 圖片" />
-          </figure>
-        );
-      }
-      return <CodeBlock code={text} lang={lang} />;
-    },
-    img({ node, alt }) {
-      const raw = (node?.properties as Record<string, unknown> | undefined)?.dataRawSrc;
-      if (typeof raw === 'string' && imageUrl && isLocalImagePath(raw)) {
-        return <img src={imageUrl(raw)} alt={alt ?? ''} loading="lazy" />;
-      }
-      return (
-        <span className="img-blocked" title="外部圖片不會載入">
-          [圖片：{alt || '未命名'}]
-        </span>
-      );
-    },
-    a({ href, children }) {
-      return (
-        <a href={href} target="_blank" rel="noopener noreferrer">
-          {children}
-        </a>
-      );
-    },
-  };
+type ImageUrl = (path: string) => string;
+const ImageUrlContext = createContext<ImageUrl | undefined>(undefined);
+
+function LocalImage({ node, alt }: { node?: any; alt?: string }) {
+  const imageUrl = useContext(ImageUrlContext);
+  const raw = (node?.properties as Record<string, unknown> | undefined)?.dataRawSrc;
+  if (typeof raw === 'string' && imageUrl && isLocalImagePath(raw)) {
+    return <img src={imageUrl(raw)} alt={alt ?? ''} loading="lazy" />;
+  }
   return (
-    <div className="markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkRawImageSrc]} urlTransform={urlTransform} components={components}>
-        {content}
-      </ReactMarkdown>
-    </div>
+    <span className="img-blocked" title="外部圖片不會載入">
+      [圖片：{alt || '未命名'}]
+    </span>
+  );
+}
+
+/**
+ * Module-level on purpose: react-markdown uses these functions as component types, so a new object
+ * per render would remount every code block, diagram and link on each parent re-render (which
+ * replaces their DOM and drops the user's text selection). imageUrl reaches the img renderer via context.
+ */
+const components: Components = {
+  pre({ node }) {
+    const code = node?.children?.[0] as any;
+    if (!code || code.type !== 'element' || code.tagName !== 'code') return <pre>{hastText(node)}</pre>;
+    const text = hastText(code).replace(/\n$/, '');
+    const lang = codeLanguage(code);
+    if (lang === 'mermaid') return <Mermaid code={text} />;
+    if (lang === 'svg') {
+      return (
+        <figure className="svg-figure">
+          <img src={svgDataUrl(text)} alt="SVG 圖片" />
+        </figure>
+      );
+    }
+    return <CodeBlock code={text} lang={lang} />;
+  },
+  img: LocalImage,
+  a({ href, children }) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    );
+  },
+};
+
+const remarkPlugins = [remarkGfm, remarkRawImageSrc];
+
+export function Markdown({ content, imageUrl }: Props) {
+  return (
+    <ImageUrlContext.Provider value={imageUrl}>
+      <div className="markdown">
+        <ReactMarkdown remarkPlugins={remarkPlugins} urlTransform={urlTransform} components={components}>
+          {content}
+        </ReactMarkdown>
+      </div>
+    </ImageUrlContext.Provider>
   );
 }
