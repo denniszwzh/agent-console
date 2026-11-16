@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { DiagramViewer, diagramSize, wheelFactor } from '../../src/web/components/DiagramViewer.js';
 
 afterEach(() => {
@@ -15,11 +15,22 @@ const img = () => screen.getByRole('img', { name: 'Mermaid 圖表' }) as HTMLIma
 const frame = () => img().parentElement as HTMLDivElement;
 const fitButton = () => screen.getByRole('button', { name: /符合大小/ }) as HTMLButtonElement;
 
-/** jsdom has no layout: give the frame a size and scrollable content. */
-function fakeLayout(el: HTMLElement, box: { clientWidth: number; clientHeight: number; scrollWidth: number; scrollHeight: number }) {
-  for (const [k, v] of Object.entries(box)) Object.defineProperty(el, k, { configurable: true, value: v });
-  el.getBoundingClientRect = () => ({ left: 0, top: 0, x: 0, y: 0, width: box.clientWidth, height: box.clientHeight, right: box.clientWidth, bottom: box.clientHeight, toJSON: () => ({}) });
+/** jsdom has no layout: give every element this width while `fn` runs. */
+function withFrameWidth(width: number, fn: () => void) {
+  const proto = HTMLElement.prototype;
+  Object.defineProperty(proto, 'clientWidth', { configurable: true, get: () => width });
+  try {
+    fn();
+  } finally {
+    // Removes the shadowing property; Element.prototype.clientWidth applies again.
+    delete (proto as unknown as Record<string, unknown>).clientWidth;
+  }
 }
+/** The image's translate, as [x, y]. */
+const pos = () => {
+  const m = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(img().style.transform);
+  return m ? [Number(m[1]), Number(m[2])] : [];
+};
 
 describe('diagramSize', () => {
   it('reads the width from the root max-width and the height from the viewBox ratio', () => {
@@ -47,12 +58,9 @@ describe('DiagramViewer', () => {
   it('starts at its natural size, capped by the frame, and zooms with the buttons', () => {
     render(<DiagramViewer svg={SVG} code={CODE} />);
     expect(img().style.width).toBe('400px');
-    expect(img().style.maxWidth).toBe('100%');
-    expect(fitButton().disabled).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: '放大' }));
     expect(img().style.width).toBe('500px');
-    expect(img().style.maxWidth).toBe('none');
     expect(fitButton().textContent).toBe('125%');
     expect(fitButton().getAttribute('aria-label')).toBe('125%，符合大小');
 
@@ -62,7 +70,6 @@ describe('DiagramViewer', () => {
 
     fireEvent.click(fitButton());
     expect(img().style.width).toBe('400px');
-    expect(img().style.maxWidth).toBe('100%');
   });
 
   it('keeps zoom within its bounds', () => {
@@ -82,16 +89,15 @@ describe('DiagramViewer', () => {
         disconnect() {}
       },
     );
-    // Shadows Element.prototype.clientWidth for the duration of the test only.
-    const proto = HTMLElement.prototype;
-    Object.defineProperty(proto, 'clientWidth', { configurable: true, get: () => 200 });
     try {
-      render(<DiagramViewer svg={SVG} code={CODE} />);
-      expect(img().style.width).toBe('200px');
-      expect(fitButton().textContent).toBe('50%');
-      expect(ro).toHaveBeenCalled();
+      withFrameWidth(232, () => {
+        render(<DiagramViewer svg={SVG} code={CODE} />);
+        // (232 - 2 × 16) / 400 = 50%
+        expect(img().style.width).toBe('200px');
+        expect(fitButton().textContent).toBe('50%');
+        expect(ro).toHaveBeenCalled();
+      });
     } finally {
-      delete (proto as unknown as Record<string, unknown>).clientWidth;
       vi.unstubAllGlobals();
     }
   });
@@ -130,44 +136,166 @@ describe('DiagramViewer', () => {
     expect(img().style.width).toBe('400px');
   });
 
-  it('pans by dragging with a mouse, but not from the scrollbar, with touch, or when nothing overflows', () => {
-    render(<DiagramViewer svg={SVG} code={CODE} />);
-    const f = frame();
-    fakeLayout(f, { clientWidth: 300, clientHeight: 200, scrollWidth: 300, scrollHeight: 200 });
-    fireEvent.pointerDown(f, { button: 0, pointerId: 1, pointerType: 'mouse', clientX: 100, clientY: 100 });
-    expect(f.className).not.toContain('panning');
+  it('can be dragged in any direction, even when the whole diagram fits', () => {
+    withFrameWidth(600, () => {
+      render(<DiagramViewer svg={SVG} code={CODE} />);
+      const f = frame();
+      // Fit: 400×200 centred in a 600-wide frame that is as tall as the diagram plus margins.
+      expect(f.style.height).toBe('232px');
+      expect(pos()).toEqual([100, 16]);
 
-    fakeLayout(f, { clientWidth: 300, clientHeight: 200, scrollWidth: 900, scrollHeight: 600 });
-    f.scrollLeft = 100;
-    f.scrollTop = 50;
-    fireEvent.pointerDown(f, { button: 0, pointerId: 2, pointerType: 'touch', clientX: 100, clientY: 100 });
-    expect(f.className).not.toContain('panning');
-    // A press on the vertical scrollbar (right of the client area).
-    fireEvent.pointerDown(f, { button: 0, pointerId: 3, pointerType: 'mouse', clientX: 305, clientY: 100 });
-    expect(f.className).not.toContain('panning');
+      fireEvent.pointerDown(f, { button: 0, pointerId: 1, pointerType: 'mouse', clientX: 100, clientY: 100 });
+      expect(f.className).toContain('panning');
+      fireEvent.pointerMove(f, { pointerId: 1, clientX: 60, clientY: 130 });
+      expect(pos()).toEqual([60, 46]);
+      fireEvent.pointerMove(f, { pointerId: 1, clientX: 150, clientY: 60 });
+      expect(pos()).toEqual([150, -24]);
+      fireEvent.pointerUp(f, { pointerId: 1 });
+      expect(f.className).not.toContain('panning');
+      fireEvent.pointerMove(f, { pointerId: 1, clientX: 0, clientY: 0 });
+      expect(pos()).toEqual([150, -24]);
 
-    fireEvent.pointerDown(f, { button: 0, pointerId: 4, pointerType: 'mouse', clientX: 100, clientY: 100 });
-    expect(f.className).toContain('panning');
-    fireEvent.pointerMove(f, { pointerId: 4, clientX: 60, clientY: 80 });
-    expect([f.scrollLeft, f.scrollTop]).toEqual([140, 70]);
-    fireEvent.pointerUp(f, { pointerId: 4 });
-    expect(f.className).not.toContain('panning');
-    fireEvent.pointerMove(f, { pointerId: 4, clientX: 0, clientY: 0 });
-    expect([f.scrollLeft, f.scrollTop]).toEqual([140, 70]);
+      // Double-click puts it back.
+      fireEvent.doubleClick(f);
+      expect(pos()).toEqual([100, 16]);
+    });
   });
 
-  it('a zoom press at the limit does not move the view later when fitting', () => {
+  it('keeps part of the diagram in view however far it is dragged', () => {
+    withFrameWidth(600, () => {
+      render(<DiagramViewer svg={SVG} code={CODE} />);
+      const f = frame();
+      fireEvent.pointerDown(f, { button: 0, pointerId: 1, pointerType: 'mouse', clientX: 0, clientY: 0 });
+      fireEvent.pointerMove(f, { pointerId: 1, clientX: 5000, clientY: 5000 });
+      // At least 48 px stay inside the 600×232 frame.
+      expect(pos()).toEqual([552, 184]);
+      fireEvent.pointerMove(f, { pointerId: 1, clientX: -5000, clientY: -5000 });
+      expect(pos()).toEqual([48 - 400, 48 - 200]);
+    });
+  });
+
+  it('pans with touch and the arrow keys, but not with other mouse buttons', () => {
+    withFrameWidth(600, () => {
+      render(<DiagramViewer svg={SVG} code={CODE} />);
+      const f = frame();
+      fireEvent.pointerDown(f, { button: 2, pointerId: 1, pointerType: 'mouse', clientX: 0, clientY: 0 });
+      expect(f.className).not.toContain('panning');
+
+      fireEvent.pointerDown(f, { button: 0, pointerId: 2, pointerType: 'touch', clientX: 0, clientY: 0 });
+      fireEvent.pointerMove(f, { pointerId: 2, clientX: -30, clientY: 10 });
+      expect(pos()).toEqual([70, 26]);
+      fireEvent.pointerUp(f, { pointerId: 2 });
+
+      fireEvent.keyDown(f, { key: 'ArrowRight' });
+      expect(pos()).toEqual([22, 26]);
+      fireEvent.keyDown(f, { key: 'ArrowUp' });
+      expect(pos()).toEqual([22, 74]);
+      fireEvent.keyDown(f, { key: 'ArrowLeft' });
+      fireEvent.keyDown(f, { key: 'ArrowDown' });
+      expect(pos()).toEqual([70, 26]);
+    });
+  });
+
+  it('zooms around the pointer and keeps the frame height', () => {
+    withFrameWidth(600, () => {
+      render(<DiagramViewer svg={SVG} code={CODE} />);
+      const f = frame();
+      // Point (300, 116) is the diagram's centre; (150, 66) is a quarter in from its top-left.
+      fireEvent(f, new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, clientX: 150, clientY: 66, bubbles: true, cancelable: true }));
+      const s = Math.exp(0.25);
+      const [x, y] = pos();
+      // The diagram point under the pointer stays under it.
+      expect((150 - x) / (400 * s)).toBeCloseTo((150 - 100) / 400, 2);
+      expect((66 - y) / (200 * s)).toBeCloseTo((66 - 16) / 200, 2);
+      expect(f.style.height).toBe('232px');
+      expect(f.className).toContain('zoomed');
+    });
+  });
+
+  it('a zoom press at the limit leaves the view where it is', () => {
+    withFrameWidth(600, () => {
+      render(<DiagramViewer svg={SVG} code={CODE} />);
+      for (let i = 0; i < 30; i++) fireEvent.click(screen.getByRole('button', { name: '放大' }));
+      const before = pos();
+      fireEvent.click(screen.getByRole('button', { name: '放大' }));
+      expect(pos()).toEqual(before);
+    });
+  });
+
+  it('a plain wheel pans once zoomed in (Shift for sideways) and scrolls the page at fit', () => {
+    withFrameWidth(600, () => {
+      render(<DiagramViewer svg={SVG} code={CODE} />);
+      const f = frame();
+      const atFit = new WheelEvent('wheel', { deltaY: 40, bubbles: true, cancelable: true });
+      f.dispatchEvent(atFit);
+      expect(atFit.defaultPrevented).toBe(false);
+
+      fireEvent.click(screen.getByRole('button', { name: '放大' }));
+      const [x0, y0] = pos();
+      const down = new WheelEvent('wheel', { deltaY: 40, bubbles: true, cancelable: true });
+      fireEvent(f, down);
+      expect(down.defaultPrevented).toBe(true);
+      expect(pos()).toEqual([x0, y0 - 40]);
+      fireEvent(f, new WheelEvent('wheel', { deltaY: 30, shiftKey: true, bubbles: true, cancelable: true }));
+      expect(pos()).toEqual([x0 - 30, y0 - 40]);
+      fireEvent(f, new WheelEvent('wheel', { deltaX: -20, bubbles: true, cancelable: true }));
+      expect(pos()).toEqual([x0 - 10, y0 - 40]);
+    });
+  });
+
+  it('wheel events that arrive before a re-render all count (trackpad pinch)', () => {
     render(<DiagramViewer svg={SVG} code={CODE} />);
-    for (let i = 0; i < 30; i++) fireEvent.click(screen.getByRole('button', { name: '放大' }));
     const f = frame();
-    fakeLayout(f, { clientWidth: 300, clientHeight: 200, scrollWidth: 2000, scrollHeight: 1000 });
-    Object.defineProperty(img(), 'clientWidth', { configurable: true, value: 2000 });
-    Object.defineProperty(img(), 'clientHeight', { configurable: true, value: 1000 });
-    f.scrollLeft = 10;
-    f.scrollTop = 20;
-    fireEvent.click(screen.getByRole('button', { name: '放大' })); // already at 500%
-    fireEvent.click(fitButton());
-    expect([f.scrollLeft, f.scrollTop]).toEqual([10, 20]);
+    act(() => {
+      for (let i = 0; i < 2; i++) f.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true }));
+    });
+    expect(img().style.width).toBe(`${Math.round(400 * Math.exp(0.25) ** 2)}px`);
+  });
+
+  it('pinches with two fingers', () => {
+    withFrameWidth(600, () => {
+      render(<DiagramViewer svg={SVG} code={CODE} />);
+      const f = frame();
+      fireEvent.pointerDown(f, { pointerId: 1, pointerType: 'touch', clientX: 250, clientY: 116 });
+      fireEvent.pointerDown(f, { pointerId: 2, pointerType: 'touch', clientX: 350, clientY: 116 });
+      // The second finger moves away: the distance doubles.
+      fireEvent.pointerMove(f, { pointerId: 2, clientX: 450, clientY: 116 });
+      expect(img().style.width).toBe('800px');
+      fireEvent.pointerUp(f, { pointerId: 2 });
+      // One finger left: it pans again.
+      const [x, y] = pos();
+      fireEvent.pointerMove(f, { pointerId: 1, clientX: 240, clientY: 106 });
+      expect(pos()).toEqual([x - 10, y - 10]);
+      fireEvent.pointerUp(f, { pointerId: 1 });
+      expect(f.className).not.toContain('panning');
+    });
+  });
+
+  it('a zoom during a drag is kept, and a lost pointer capture ends the drag', () => {
+    withFrameWidth(600, () => {
+      render(<DiagramViewer svg={SVG} code={CODE} />);
+      const f = frame();
+      fireEvent.pointerDown(f, { button: 0, pointerId: 1, pointerType: 'mouse', clientX: 100, clientY: 100 });
+      fireEvent.keyDown(f, { key: '+' });
+      const [x, y] = pos();
+      fireEvent.pointerMove(f, { pointerId: 1, clientX: 110, clientY: 105 });
+      expect(pos()).toEqual([x + 10, y + 5]);
+      fireEvent.lostPointerCapture(f, { pointerId: 1 });
+      expect(f.className).not.toContain('panning');
+      fireEvent.pointerMove(f, { pointerId: 1, clientX: 300, clientY: 300 });
+      expect(pos()).toEqual([x + 10, y + 5]);
+    });
+  });
+
+  it('zoom-out never enlarges a very wide diagram that fits below the usual minimum', () => {
+    const wide = '<svg viewBox="0 0 6000 300" style="max-width: 6000px;"></svg>';
+    withFrameWidth(332, () => {
+      render(<DiagramViewer svg={wide} code={CODE} />);
+      // (332 - 32) / 6000 = 5%
+      expect(img().style.width).toBe('300px');
+      fireEvent.click(screen.getByRole('button', { name: '縮小' }));
+      expect(img().style.width).toBe('300px');
+    });
   });
 
   it('shows the source instead of the diagram and back', () => {

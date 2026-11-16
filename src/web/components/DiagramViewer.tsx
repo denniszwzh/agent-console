@@ -18,6 +18,14 @@ export const MAX_ZOOM = 5;
 export const ZOOM_STEP = 1.25;
 /** Fit never enlarges a diagram past this (small diagrams in the full-screen view). */
 const MAX_FIT = 2;
+/** Margin around the fitted diagram, and how much of it always stays inside the frame when panned. */
+const PAD = 16;
+const KEEP = 48;
+const KEY_PAN = 48;
+const MIN_FRAME_H = 120;
+/** Used when the SVG states no size (Mermaid always does). */
+const FALLBACK_WIDTH = 600;
+const FALLBACK_RATIO = 0.6;
 /** Wheel zoom: factor = exp(-deltaPx * WHEEL_K), with |deltaPx| capped (trackpad pinches send many small deltas). */
 const WHEEL_K = 0.0025;
 const WHEEL_MAX_DELTA = 100;
@@ -42,8 +50,6 @@ export function diagramSize(svg: string): DiagramSize | undefined {
   return { width, height: vbW && vbH ? (width * vbH) / vbW : 0 };
 }
 
-const clamp = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
-
 /** Zoom factor for one ctrl/cmd + wheel event. */
 export function wheelFactor(e: Pick<WheelEvent, 'deltaY' | 'deltaMode'>): number {
   const px = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
@@ -61,35 +67,38 @@ interface FrameProps {
   actions: ReactNode;
 }
 
+interface View {
+  /** null = fit to the frame. */
+  zoom: number | null;
+  /** Offset from the centred position, in pixels. */
+  x: number;
+  y: number;
+}
+const FIT: View = { zoom: null, x: 0, y: 0 };
+
 /**
- * A scrollable frame showing the diagram image. Zoom changes the image's layout width (not a CSS
- * transform), so the SVG is redrawn sharp at every size. Ctrl/Cmd + wheel (or a trackpad pinch)
- * zooms around the pointer; dragging with a mouse or pen pans when the diagram overflows the frame.
- * With the frame focused, + / - / 0 zoom in, out and back to fit.
+ * The diagram in a fixed frame that can be panned freely in any direction, at any zoom. Zoom
+ * changes the image's layout size (not a CSS scale), so the SVG is redrawn sharp at every size;
+ * the position is a translate, which does not blur.
+ * - Drag (mouse, pen, one finger) pans; two fingers pinch-zoom; double-click fits.
+ * - Ctrl/Cmd + wheel (or a trackpad pinch) zooms around the pointer. A plain wheel or two-finger
+ *   swipe pans once zoomed in (and always in full screen); at fit it scrolls the page.
+ * - With the frame focused, the arrow keys pan and + / - / 0 zoom in, out and back to fit.
+ * Inline, the frame is as tall as the fitted diagram; touch keeps vertical swipes for the page there.
+ * All updates are functional, so several events within one frame (a trackpad pinch) compound.
  */
 function ZoomFrame({ url, alt, size, fit, className, actions }: FrameProps) {
   const frameRef = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
   const [frame, setFrame] = useState({ w: 0, h: 0 });
-  // null = fit to the frame.
-  const [zoom, setZoom] = useState<number | null>(null);
-  const [canPan, setCanPan] = useState(false);
+  const [view, setView] = useState<View>(FIT);
   const [panning, setPanning] = useState(false);
-  const anchor = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
-  const drag = useRef<{ x: number; y: number; left: number; top: number; id: number } | null>(null);
+  // Active pointers (frame-relative positions), for drag and pinch.
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
 
   useLayoutEffect(() => {
     const el = frameRef.current;
     if (!el) return;
-    // Content box: fitting to clientWidth would overflow by the padding.
-    const measure = () => {
-      const cs = getComputedStyle(el);
-      const px = (v: string) => Number.parseFloat(v) || 0;
-      setFrame({
-        w: Math.max(0, el.clientWidth - px(cs.paddingLeft) - px(cs.paddingRight)),
-        h: Math.max(0, el.clientHeight - px(cs.paddingTop) - px(cs.paddingBottom)),
-      });
-    };
+    const measure = () => setFrame({ w: el.clientWidth, h: el.clientHeight });
     measure();
     if (typeof ResizeObserver !== 'function') return;
     const ro = new ResizeObserver(measure);
@@ -97,151 +106,204 @@ function ZoomFrame({ url, alt, size, fit, className, actions }: FrameProps) {
     return () => ro.disconnect();
   }, []);
 
-  const natural = size?.width ?? 0;
+  const natW = size?.width || FALLBACK_WIDTH;
+  const natH = size?.height || natW * FALLBACK_RATIO;
   const fitScale = useMemo(() => {
-    if (!natural || !frame.w) return 1;
-    const byWidth = frame.w / natural;
-    const s = fit === 'contain' && size?.height && frame.h ? Math.min(byWidth, frame.h / size.height) : byWidth;
-    return Math.min(fit === 'contain' ? MAX_FIT : 1, s);
-  }, [natural, size?.height, frame.w, frame.h, fit]);
-  const scale = zoom ?? fitScale;
+    if (!frame.w) return 1;
+    const byWidth = Math.max(0, frame.w - 2 * PAD) / natW;
+    if (fit === 'width') return Math.min(1, byWidth);
+    const byHeight = frame.h ? Math.max(0, frame.h - 2 * PAD) / natH : byWidth;
+    return Math.min(MAX_FIT, byWidth, byHeight);
+  }, [natW, natH, frame.w, frame.h, fit]);
+  // Inline, the frame keeps the fitted height whatever the zoom (the diagram is panned inside it).
+  const frameHeight = fit === 'width' ? Math.max(MIN_FRAME_H, Math.round(natH * fitScale + 2 * PAD)) : undefined;
+  const fw = frame.w;
+  const fh = frameHeight ?? frame.h;
 
-  const zoomTo = useCallback(
-    (next: number, at?: { x: number; y: number }) => {
-      const z = clamp(next);
-      if (z === scale) return; // at a limit: nothing changes, so nothing to anchor
-      const el = frameRef.current;
-      const img = imgRef.current;
-      if (el && img && img.clientWidth) {
-        // Remember which point of the diagram is under the pointer (or the frame centre), so it stays put.
-        const x = at?.x ?? el.clientWidth / 2;
-        const y = at?.y ?? el.clientHeight / 2;
-        anchor.current = {
-          x,
-          y,
-          px: (el.scrollLeft + x - img.offsetLeft) / img.clientWidth,
-          py: img.clientHeight ? (el.scrollTop + y - img.offsetTop) / img.clientHeight : 0,
-        };
-      }
-      setZoom(z);
+  /** Geometry of a view: its scale, its clamped offset and the image's box in the frame. */
+  const layout = useCallback(
+    (v: View) => {
+      const scale = v.zoom ?? fitScale;
+      const w = natW * scale;
+      const h = natH * scale;
+      const cx = (fw - w) / 2;
+      const cy = (fh - h) / 2;
+      // At least KEEP pixels of the diagram stay inside the frame on each axis.
+      const left = Math.min(fw - KEEP, Math.max(KEEP - w, cx + v.x));
+      const top = Math.min(fh - KEEP, Math.max(KEEP - h, cy + v.y));
+      return { scale, w, h, left, top, x: left - cx, y: top - cy };
     },
-    [scale],
+    [fitScale, natW, natH, fw, fh],
   );
-  const fitToFrame = useCallback(() => {
-    anchor.current = null;
-    setZoom(null);
-  }, []);
+  // Zoom never goes below the fitted size of a very wide diagram's fit, nor above MAX_ZOOM.
+  const minZoom = Math.min(MIN_ZOOM, fitScale);
 
-  // After the image got its new size: put the anchored point back, and see whether there is anything to pan.
-  useLayoutEffect(() => {
-    const el = frameRef.current;
-    const img = imgRef.current;
-    const a = anchor.current;
-    anchor.current = null;
-    if (el && img && a) {
-      el.scrollLeft = img.offsetLeft + a.px * img.clientWidth - a.x;
-      el.scrollTop = img.offsetTop + a.py * img.clientHeight - a.y;
-    }
-    if (el) setCanPan(el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight);
-  }, [scale]);
+  const zoomBy = useCallback(
+    (factor: number, at?: { x: number; y: number }) =>
+      setView((prev) => {
+        const g = layout(prev);
+        const z = Math.min(MAX_ZOOM, Math.max(minZoom, g.scale * factor));
+        if (z === g.scale) return prev;
+        // Keep the diagram point under the pointer (or the frame centre) where it is; a pointer
+        // outside the diagram anchors on its nearest edge.
+        const ax = at?.x ?? fw / 2;
+        const ay = at?.y ?? fh / 2;
+        const u = g.w ? Math.min(1, Math.max(0, (ax - g.left) / g.w)) : 0.5;
+        const v = g.h ? Math.min(1, Math.max(0, (ay - g.top) / g.h)) : 0.5;
+        const w = natW * z;
+        const h = natH * z;
+        const next = layout({ zoom: z, x: ax - u * w - (fw - w) / 2, y: ay - v * h - (fh - h) / 2 });
+        return { zoom: z, x: next.x, y: next.y };
+      }),
+    [layout, minZoom, fw, fh, natW, natH],
+  );
+  const panBy = useCallback(
+    (dx: number, dy: number) =>
+      setView((prev) => {
+        const g = layout(prev);
+        const next = layout({ ...prev, x: g.x + dx, y: g.y + dy });
+        return { ...prev, x: next.x, y: next.y };
+      }),
+    [layout],
+  );
+  const fitToFrame = useCallback(() => setView(FIT), []);
 
-  const wheel = useRef({ zoomTo, scale });
+  const g = layout(view);
+  const zoomed = view.zoom !== null;
+
+  // The native wheel listener reads the latest handlers and state through this ref.
+  const live = useRef({ zoomBy, panBy, wheelPans: false });
   useLayoutEffect(() => {
-    wheel.current = { zoomTo, scale };
+    live.current = { zoomBy, panBy, wheelPans: zoomed || fit === 'contain' };
   });
   useEffect(() => {
     const el = frameRef.current;
     if (!el) return;
     // Registered by hand: React's wheel listener is passive and could not stop the page zoom.
     const onWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey && !e.metaKey) return;
-      e.preventDefault();
-      if (!e.deltaY) return;
-      const r = el.getBoundingClientRect();
-      const { zoomTo: zt, scale: s } = wheel.current;
-      zt(s * wheelFactor(e), { x: e.clientX - r.left, y: e.clientY - r.top });
+      const { zoomBy: zb, panBy: pb, wheelPans } = live.current;
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        if (!e.deltaY) return;
+        const r = el.getBoundingClientRect();
+        zb(wheelFactor(e), { x: e.clientX - r.left, y: e.clientY - r.top });
+      } else if (wheelPans) {
+        e.preventDefault();
+        // Shift + wheel scrolls sideways, as it does on a page.
+        const dx = (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * unit;
+        const dy = (e.shiftKey && !e.deltaX ? 0 : e.deltaY) * unit;
+        pb(-dx, -dy);
+      }
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
+  const local = (e: { clientX: number; clientY: number }) => {
+    const r = frameRef.current!.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     const el = frameRef.current;
-    // Touch keeps the browser's own scrolling; only a mouse or pen drag pans.
-    if (!el || e.button !== 0 || e.pointerType === 'touch') return;
-    if (el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight) return;
-    // A press on the frame's own scrollbars is left to the browser.
-    const r = el.getBoundingClientRect();
-    if (e.clientX - r.left - el.clientLeft >= el.clientWidth || e.clientY - r.top - el.clientTop >= el.clientHeight) return;
+    if (!el || (e.pointerType !== 'touch' && e.button !== 0)) return;
     e.preventDefault();
-    drag.current = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop, id: e.pointerId };
+    el.focus({ preventScroll: true });
+    pointers.current.set(e.pointerId, local(e));
     el.setPointerCapture?.(e.pointerId);
     setPanning(true);
   };
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const el = frameRef.current;
-    const d = drag.current;
-    if (!el || !d || d.id !== e.pointerId) return;
-    el.scrollLeft = d.left - (e.clientX - d.x);
-    el.scrollTop = d.top - (e.clientY - d.y);
+    const ps = pointers.current;
+    const prev = ps.get(e.pointerId);
+    if (!prev) return;
+    const cur = local(e);
+    if (ps.size >= 2) {
+      // Pinch: zoom by the change in finger distance around their midpoint, and follow the midpoint.
+      const other = [...ps.entries()].find(([id]) => id !== e.pointerId)![1];
+      const before = Math.hypot(prev.x - other.x, prev.y - other.y);
+      const after = Math.hypot(cur.x - other.x, cur.y - other.y);
+      const mid = { x: (cur.x + other.x) / 2, y: (cur.y + other.y) / 2 };
+      panBy((cur.x - prev.x) / 2, (cur.y - prev.y) / 2);
+      if (before > 0 && after > 0) zoomBy(after / before, mid);
+    } else {
+      // Moves are applied as deltas, so a zoom or key press during a drag is not undone.
+      panBy(cur.x - prev.x, cur.y - prev.y);
+    }
+    ps.set(e.pointerId, cur);
   };
-  const endPan = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (drag.current?.id !== e.pointerId) return;
-    drag.current = null;
-    setPanning(false);
+  const endPointer = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const ps = pointers.current;
+    if (!ps.delete(e.pointerId)) return;
+    if (ps.size === 0) setPanning(false);
   };
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.key === '+' || e.key === '=') zoomTo(scale * ZOOM_STEP);
-    else if (e.key === '-' || e.key === '_') zoomTo(scale / ZOOM_STEP);
+    if (e.key === '+' || e.key === '=') zoomBy(ZOOM_STEP);
+    else if (e.key === '-' || e.key === '_') zoomBy(1 / ZOOM_STEP);
     else if (e.key === '0') fitToFrame();
+    else if (e.key === 'ArrowLeft') panBy(KEY_PAN, 0);
+    else if (e.key === 'ArrowRight') panBy(-KEY_PAN, 0);
+    else if (e.key === 'ArrowUp') panBy(0, KEY_PAN);
+    else if (e.key === 'ArrowDown') panBy(0, -KEY_PAN);
     else return;
     e.preventDefault();
   };
 
-  const percent = `${Math.round(scale * 100)}%`;
-  const imgStyle = natural
-    ? { width: `${Math.round(natural * scale)}px`, maxWidth: zoom === null && fit === 'width' ? '100%' : 'none' }
-    : undefined;
+  const percent = `${Math.round(g.scale * 100)}%`;
 
   return (
     <div className={className}>
       <div className="diagram-toolbar" role="group" aria-label="圖表工具">
-        <button type="button" className="diagram-btn" aria-label="縮小" title="縮小（-、Ctrl + 滾輪）" onClick={() => zoomTo(scale / ZOOM_STEP)}>
+        <button type="button" className="diagram-btn" aria-label="縮小" title="縮小（-、Ctrl + 滾輪）" onClick={() => zoomBy(1 / ZOOM_STEP)}>
           −
         </button>
         <button
           type="button"
           className="diagram-btn diagram-zoom"
           aria-label={`${percent}，符合大小`}
-          title="符合大小（0）"
+          title="符合大小（0、按兩下圖表）"
           onClick={fitToFrame}
-          disabled={zoom === null}
         >
           {percent}
         </button>
-        <button type="button" className="diagram-btn" aria-label="放大" title="放大（+、Ctrl + 滾輪）" onClick={() => zoomTo(scale * ZOOM_STEP)}>
+        <button type="button" className="diagram-btn" aria-label="放大" title="放大（+、Ctrl + 滾輪）" onClick={() => zoomBy(ZOOM_STEP)}>
           ＋
         </button>
         {actions}
       </div>
       <div
         ref={frameRef}
-        className={`diagram-frame${canPan ? ' pannable' : ''}${panning ? ' panning' : ''}`}
+        className={`diagram-frame${zoomed ? ' zoomed' : ''}${panning ? ' panning' : ''}`}
+        style={frameHeight ? { height: `${frameHeight}px` } : undefined}
+        role="group"
+        aria-roledescription="可移動的圖表"
+        aria-label="拖曳或用方向鍵移動，+ / - 縮放，0 符合大小"
         tabIndex={0}
-        aria-label={`${alt}，${percent}`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
-        onPointerUp={endPan}
-        onPointerCancel={endPan}
+        onPointerUp={endPointer}
+        onPointerCancel={endPointer}
+        onLostPointerCapture={endPointer}
+        onDoubleClick={fitToFrame}
         onKeyDown={onKeyDown}
       >
         {/* Rendered through <img>: the SVG cannot run scripts or touch the page. */}
-        <img ref={imgRef} src={url} alt={alt} draggable={false} style={imgStyle} />
+        <img
+          src={url}
+          alt={alt}
+          draggable={false}
+          style={{
+            width: `${Math.round(g.w)}px`,
+            height: `${Math.round(g.h)}px`,
+            transform: `translate(${Math.round(g.left)}px, ${Math.round(g.top)}px)`,
+          }}
+        />
       </div>
     </div>
   );
 }
+
 
 /** Saves the SVG through a Blob URL (data URLs over ~2 MB are refused by Chrome). */
 function downloadSvg(svg: string): void {

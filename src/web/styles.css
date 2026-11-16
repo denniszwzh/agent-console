@@ -864,24 +864,28 @@ textarea {
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
 }
-/* Inline, the frame grows with the diagram (no height cap); only a zoomed-in width scrolls. */
+/* A fixed window onto the diagram: the image is positioned by translate and can be dragged anywhere. */
 .diagram-frame {
-  position: relative; /* offset parent of the image, for zoom anchoring */
-  display: flex;
-  padding: 1rem;
-  overflow: auto;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  /* Inline, a vertical finger swipe still scrolls the page (never a dead zone); horizontal swipes
+     and pinches go to the diagram. Full screen, every gesture goes to the diagram. */
+  touch-action: pan-y;
+}
+.diagram-full .diagram-frame {
+  touch-action: none;
 }
 .diagram-frame:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 .diagram-frame img {
-  flex: none;
-  /* Auto margins centre the image without making overflow unreachable. */
-  margin: auto;
-}
-.diagram-frame.pannable {
-  cursor: grab;
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
 }
 .diagram-frame.panning {
   cursor: grabbing;
@@ -917,8 +921,6 @@ textarea {
 .diagram-full .diagram-frame {
   flex: 1;
   min-height: 0;
-  /* A scrollbar appearing must not shrink the box that fit measures (it would flicker). */
-  scrollbar-gutter: stable both-edges;
 }
 .diagram-full .diagram-toolbar {
   left: auto;
