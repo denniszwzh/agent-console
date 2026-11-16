@@ -106,7 +106,7 @@ the path the hooks report, else by searching `~/.claude/projects` (or `CLAUDE_CO
 Hold **Alt** and press **S** to open the quick switcher. It lists every session, the most recently changed first, with
 its name, folder, start time, last change (e.g. 「3 分鐘前」), and live status: 回應中 (with elapsed time), review
 threads being answered, open threads, and the state of the latest reply. While still holding Alt, click a session to
-open its latest reply. Releasing Alt, pressing Esc, or switching away from the window closes the switcher. The shortcut
+open it. Releasing Alt, pressing Esc, or switching away from the window closes the switcher. The shortcut
 works only while the panel's browser tab has focus.
 
 ## Sidebar groups and the conversation view
