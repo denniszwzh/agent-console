@@ -7,6 +7,7 @@ import { SessionSwitcher, useHoldSwitcher } from './components/SessionSwitcher.j
 import { Sidebar } from './components/Sidebar.js';
 import { useSidebarLayout } from './layout.js';
 import type { UnitActions } from './unit-context.js';
+import { loadViewState, saveViewState } from './view-state.js';
 
 // Coalesces bursts of SSE events (streamed answers emit many) into one refetch.
 const REFRESH_DELAY_MS = 150;
@@ -29,6 +30,9 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [unauthorized, setUnauthorized] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Where the page was before a reload; the anchor is used once, for that session's first showing.
+  const [restored] = useState(loadViewState);
+  const [initialAnchor, setInitialAnchor] = useState(restored.anchor);
   const layout = useSidebarLayout();
   const switcher = useHoldSwitcher();
   // Request counters so a slow, older response never overwrites a newer one.
@@ -117,11 +121,15 @@ export function App() {
     return fresh.length ? [...fresh, ...sessions] : sessions;
   }, [sessions, activity]);
 
-  // Default to the most recent session.
+  // Reopen the session from before the reload; otherwise (once everything is loaded) the most recent one.
   useEffect(() => {
-    if (selected || sessions.length === 0) return;
-    setSelected(sessions[0].sessionId);
-  }, [sessions, selected]);
+    if (selected) return;
+    if (restored.session && sidebarSessions.some((s) => s.sessionId === restored.session)) {
+      setSelected(restored.session);
+      return;
+    }
+    if ((loaded || !restored.session) && sessions.length > 0) setSelected(sessions[0].sessionId);
+  }, [sessions, sidebarSessions, selected, loaded, restored.session]);
 
   const respondingIds = useMemo(() => new Set(activity.map((a) => a.sessionId)), [activity]);
   const selectedActivity = selected ? activity.find((a) => a.sessionId === selected) : undefined;
@@ -165,6 +173,8 @@ export function App() {
 
   const selectSession = (session: string) => {
     setSelected(session);
+    setInitialAnchor(null);
+    saveViewState({ session, anchor: null });
   };
 
   if (unauthorized) {
@@ -234,6 +244,8 @@ export function App() {
             actionsFor={actionsFor}
             navToggle={navToggle}
             responding={selectedActivity}
+            initialAnchor={selected === restored.session ? initialAnchor : null}
+            onAnchorChange={(anchor) => saveViewState({ session: selected, anchor })}
           />
         ) : (
           <>
