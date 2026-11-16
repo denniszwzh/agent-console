@@ -35,6 +35,12 @@ describe('cleanPromptText', () => {
     expect(cleanPromptText('  修正錯誤  ')).toBe('修正錯誤');
   });
 
+  it('drops shell-mode, IDE and memory messages', () => {
+    for (const tag of ['bash-input', 'bash-stdout', 'bash-stderr', 'ide_opened_file', 'ide_selection', 'ide_diagnostics', 'user-memory-input']) {
+      expect(cleanPromptText(`<${tag}>x</${tag}>`), tag).toBeUndefined();
+    }
+  });
+
   it('strips reminders inside a prompt and unwraps pasted content', () => {
     expect(cleanPromptText('看這個\n<system-reminder>\nnoise\n</system-reminder>')).toBe('看這個');
     expect(cleanPromptText('<pasted_content id="6017">\n貼上的需求\n</pasted_content>\n補充')).toBe('貼上的需求\n\n補充');

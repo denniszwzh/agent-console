@@ -25,6 +25,13 @@ const INJECTED_TAGS = [
   'subagent_notification',
   'skill',
   'user_instructions',
+  'bash-input',
+  'bash-stdout',
+  'bash-stderr',
+  'ide_opened_file',
+  'ide_selection',
+  'ide_diagnostics',
+  'user-memory-input',
 ];
 const INJECTED_START = new RegExp(`^<(?:${INJECTED_TAGS.join('|')})[\\s>]`);
 const INJECTED_PREFIXES = ['[Request interrupted by user', '# AGENTS.md instructions'];

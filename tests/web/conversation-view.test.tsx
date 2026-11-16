@@ -142,6 +142,45 @@ describe('ConversationView', () => {
     expect(stream().scrollTop).toBe(420);
   });
 
+  it('keeps the stream position after adding a file', async () => {
+    const units = turns(10);
+    const { rerender } = view(units);
+    scrollTo(420);
+    fireEvent.click(screen.getByRole('button', { name: /加入檔案/ }));
+    fireEvent.change(screen.getByPlaceholderText(/檔案路徑/), { target: { value: 'src/added.ts' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '加入' }));
+    });
+    const latest = { ...units[9], files: [{ id: 'added', kind: 'file' as const, path: 'src/added.ts', content: 'x', blocks: [] }] };
+    rerender(<ConversationView session={session} units={[...units.slice(0, 9), latest]} actionsFor={actionsFor} />);
+    expect(screen.getByRole('tab', { name: 'added.ts' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(screen.getByRole('tab', { name: /對話/ }));
+    expect(stream().scrollTop).toBe(420);
+  });
+
+  it('follows content added below while the reader sits at the bottom', () => {
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    view(turns(10));
+    scrollTo(1050);
+    extra = 200;
+    act(() => observers.forEach((cb) => cb()));
+    expect(stream().scrollTop).toBe(1250);
+    scrollTo(500);
+    extra = 400;
+    act(() => observers.forEach((cb) => cb()));
+    expect(stream().scrollTop).toBe(500);
+  });
+
   it('renders the newest 30 turns and loads 30 more near the top', () => {
     view(turns(35));
     expect(sections()).toHaveLength(30);

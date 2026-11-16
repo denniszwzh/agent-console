@@ -161,7 +161,10 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
     const content = contentRef.current;
     if (!content || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => {
-      if (pinned.current && activeRef.current === STREAM) applyPin();
+      if (activeRef.current !== STREAM) return;
+      // Like a terminal: a reader sitting at the bottom keeps seeing what is added below.
+      if (!pinned.current && atBottom.current) pinned.current = 'bottom';
+      applyPin();
     });
     ro.observe(content);
     return () => ro.disconnect();
@@ -183,13 +186,20 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
     };
   }, [report]);
 
+  /** Switches tabs, remembering the conversation's position when leaving it. */
+  const select = useCallback((id: string) => {
+    const el = streamRef.current;
+    if (activeRef.current === STREAM && id !== STREAM && el) savedTop.current = el.scrollTop;
+    setActive(id);
+  }, []);
+
   // After "add file", switch to the new tab once it arrives.
   const fileCount = latest?.files.length ?? 0;
   useEffect(() => {
     if (!latest || awaitingFile.current === null || fileCount <= awaitingFile.current) return;
     awaitingFile.current = null;
-    setActive(tabId(latest.id, latest.files[fileCount - 1].id));
-  }, [fileCount, latest]);
+    select(tabId(latest.id, latest.files[fileCount - 1].id));
+  }, [fileCount, latest, select]);
 
   const onScroll = () => {
     const el = streamRef.current;
@@ -213,12 +223,6 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
     applyPin();
   };
 
-  const select = (id: string) => {
-    const el = streamRef.current;
-    if (activeRef.current === STREAM && id !== STREAM && el) savedTop.current = el.scrollTop;
-    setActive(id);
-  };
-
   // Back on the conversation tab: return to where it was.
   const prevActive = useRef(active);
   useLayoutEffect(() => {
@@ -240,11 +244,9 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
         const turnNumber = unitsRef.current.findIndex((u) => u.id === unitId) + 1;
         setTemps((t) => (t.some((x) => x.id === id) ? t : [...t, { id, unitId, sourceId, turnNumber }]));
       }
-      const el = streamRef.current;
-      if (activeRef.current === STREAM && el) savedTop.current = el.scrollTop;
-      setActive(id);
+      select(id);
     },
-    [],
+    [select],
   );
 
   const close = (id: string) => {
