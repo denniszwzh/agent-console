@@ -206,3 +206,12 @@ describe('SessionMetaService prompt rules (Claude)', () => {
     expect(svc().describe('claude', 's1')).toMatchObject({ title: '貼上的需求', titleSource: 'prompt' });
   });
 });
+
+describe('SessionMetaService.transcriptFor', () => {
+  it('finds a transcript and refuses unsafe ids', () => {
+    writeFileSync(claudeFile('s1'), line({ type: 'custom-title', customTitle: 'x' }));
+    expect(svc().transcriptFor('claude', 's1')).toBe(claudeFile('s1'));
+    expect(svc().transcriptFor('claude', 'gone')).toBeUndefined();
+    expect(svc().transcriptFor('claude', '../etc')).toBeUndefined();
+  });
+});

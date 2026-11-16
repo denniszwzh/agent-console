@@ -190,6 +190,16 @@ export class SessionMetaService {
     }
   }
 
+  /** The session's transcript (Claude) or rollout (Codex), if it can be found. Never throws. */
+  transcriptFor(agent: AgentKind, sessionId: string, knownPath?: string): string | undefined {
+    if (!isSafeId(sessionId)) return undefined;
+    try {
+      return this.locate(agent, sessionId, knownPath);
+    } catch {
+      return undefined;
+    }
+  }
+
   private locate(agent: AgentKind, sessionId: string, knownPath?: string): string | undefined {
     const known = acceptableTranscriptPath(knownPath);
     if (known && isFile(known)) return known;
