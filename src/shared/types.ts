@@ -87,6 +87,10 @@ export interface ReviewUnit {
   delivered: boolean;
   /** Absolute path of the conclusion bundle file (set at submit; the UI offers it as a fallback). */
   conclusionsPath?: string;
+  /** Set while the server writes each answered thread's conclusion before submitting them. */
+  integrating?: boolean;
+  /** Why the last integration stopped before submitting (a conclusion run failed, or a restart). */
+  integrationError?: string;
   /** Codex only: how a submitted unit was handed back (set at submit). */
   delivery?: { queued: boolean; instruction: string };
   warnings: { at: string; threadId: string; paths: string[] }[];
