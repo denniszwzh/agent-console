@@ -39,8 +39,8 @@ describe('ThreadView', () => {
     expect(screen.getByText('How much cost?')).toBeTruthy();
     expect(screen.getByText('Roughly ten dollars.')).toBeTruthy();
     expect(screen.getByText('Per month?')).toBeTruthy();
-    expect(screen.getByText('草稿')).toBeTruthy();
-    expect(screen.getAllByText('已回答')).toHaveLength(2);
+    expect(screen.getByText('Draft')).toBeTruthy();
+    expect(screen.getAllByText('Answered')).toHaveLength(2);
   });
 
   it('an answered thread offers only a follow-up', () => {
@@ -48,7 +48,7 @@ describe('ThreadView', () => {
     const t = makeThread('t1', anchorOn(unit));
     unit.threads = [t];
     renderInUnit(<ThreadView thread={t} />, unit);
-    expect(screen.getByRole('button', { name: '追問' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Follow up' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '結束此串' })).toBeNull();
   });
 
@@ -58,9 +58,9 @@ describe('ThreadView', () => {
     unit.threads = [t];
     const actions = fakeActions();
     renderInUnit(<ThreadView thread={t} />, unit, actions);
-    fireEvent.click(screen.getByRole('button', { name: '送出' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(actions.sendThread).toHaveBeenCalledWith('t1');
-    fireEvent.click(screen.getByRole('button', { name: '刪除' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(actions.deleteThread).toHaveBeenCalledWith('t1');
   });
 
@@ -70,14 +70,14 @@ describe('ThreadView', () => {
     unit.threads = [t];
     const actions = fakeActions();
     const { rerender } = renderInUnit(<ThreadView thread={t} />, unit, actions);
-    expect(screen.getByRole('button', { name: '追問' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Follow up' })).toBeTruthy();
     rerender(
       <UnitProvider unit={{ ...unit, integrating: true }} actions={actions}>
         <ThreadView thread={t} />
       </UnitProvider>,
     );
     expect(screen.getByText('Question t1?')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '追問' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Follow up' })).toBeNull();
   });
 
   it('a concluded thread shows its conclusion', () => {
@@ -85,8 +85,8 @@ describe('ThreadView', () => {
     const t = makeThread('t1', anchorOn(unit), { status: 'resolved', conclusion: 'Keep it.' });
     unit.threads = [t];
     renderInUnit(<ThreadView thread={t} />, unit);
-    expect(screen.getByText('有結論')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /展開/ }));
+    expect(screen.getByText('Concluded')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Expand/ }));
     expect(screen.getByText('Keep it.')).toBeTruthy();
   });
 
@@ -95,8 +95,8 @@ describe('ThreadView', () => {
     const t = makeThread('t1', anchorOn(unit), { status: 'error', error: 'boom' });
     unit.threads = [t];
     renderInUnit(<ThreadView thread={t} />, unit);
-    expect(screen.getByText('錯誤')).toBeTruthy();
+    expect(screen.getByText('Error')).toBeTruthy();
     expect(screen.getByText(/boom/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: '重試' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
   });
 });

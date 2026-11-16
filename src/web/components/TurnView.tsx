@@ -16,7 +16,7 @@ function PromptText({ text }: { text: string }) {
       {folded ? lines.slice(0, FOLD_LINES).join('\n') : text}
       {folded && (
         <button type="button" className="btn ghost small turn-prompt-more" onClick={() => setOpen(true)}>
-          展開
+          Show more
         </button>
       )}
     </div>
@@ -28,7 +28,7 @@ function DeliveryPrompt({ text }: { text: string }) {
   return (
     <div className="turn-prompt turn-prompt-delivery">
       <button type="button" className="btn ghost small" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        帶入審查結論
+        Review conclusions applied
       </button>
       {open && <div className="turn-prompt-text">{text}</div>}
     </div>
@@ -38,13 +38,13 @@ function DeliveryPrompt({ text }: { text: string }) {
 function Prompts({ prompts, omitted }: { prompts: TurnPrompt[]; omitted: number }) {
   return (
     <div className="turn-prompts">
-      {omitted > 0 && <div className="turn-prompts-omitted">還有 {omitted} 則較早的提問</div>}
+      {omitted > 0 && <div className="turn-prompts-omitted">{omitted} earlier {omitted === 1 ? 'prompt' : 'prompts'} not shown</div>}
       {prompts.map((p, i) =>
         p.delivery ? (
           <DeliveryPrompt key={i} text={p.text} />
         ) : (
           <div key={i} className="turn-prompt">
-            <span className="turn-prompt-who">你：</span>
+            <span className="turn-prompt-who">You:</span>
             <PromptText text={p.text} />
           </div>
         ),
@@ -59,7 +59,7 @@ function Notices({ unit, latestOpen }: { unit: ReviewUnit; latestOpen: boolean }
     <>
       {paths.length > 0 && (
         <div className="banner banner-danger" role="alert">
-          <strong>問題串執行期間偵測到檔案變動</strong>
+          <strong>Files changed while a thread was running</strong>
           <ul>
             {paths.map((p) => (
               <li key={p}>
@@ -67,16 +67,16 @@ function Notices({ unit, latestOpen }: { unit: ReviewUnit; latestOpen: boolean }
               </li>
             ))}
           </ul>
-          <p className="hint">這也可能是你自己在編輯器中修改了檔案。</p>
+          <p className="hint">You may also have edited them in your editor yourself.</p>
         </div>
       )}
       {unit.scanNotice && (
         <div className="banner banner-scan">
           {unit.scanNotice.omitted > 0 && (
-            <p>這一輪還有 {unit.scanNotice.omitted} 個變動的檔案沒有加入（每輪最多自動加入 30 個，先加入最新的）。</p>
+            <p>{unit.scanNotice.omitted} more changed files from this turn were not added (at most 30 are added per turn, newest first).</p>
           )}
-          {unit.scanNotice.incomplete && <p>資料夾太大，檔案掃描沒有做完，可能漏掉一些檔案。</p>}
-          {latestOpen && <p className="hint">需要的檔案可以用「＋ 加入檔案」加入。</p>}
+          {unit.scanNotice.incomplete && <p>The folder is too large; the file scan did not finish and may have missed some files.</p>}
+          {latestOpen && <p className="hint">Add the files you need with + Add file.</p>}
         </div>
       )}
     </>
@@ -96,7 +96,7 @@ interface Props {
 /** One turn of a session: the user's prompts, the agent's reply (reviewable while open), and the files it changed. */
 export const TurnView = memo(function TurnView({ unit, actions, latest, turnNumber, onOpenFile }: Props) {
   return (
-    <section className={`turn turn-${unit.status}`} data-unit-id={unit.id} aria-label={`第 ${turnNumber} 輪`}>
+    <section className={`turn turn-${unit.status}`} data-unit-id={unit.id} aria-label={`Turn ${turnNumber}`}>
       <div className="turn-divider">
         <span className="turn-time">{formatTime(unit.createdAt)}</span>
         <span className={`unit-status unit-status-${unit.status}`}>{UNIT_STATUS_LABELS[unit.status]}</span>
@@ -111,10 +111,10 @@ export const TurnView = memo(function TurnView({ unit, actions, latest, turnNumb
       <Notices unit={unit} latestOpen={latest && unit.status === 'open'} />
       {unit.files.length > 0 && (
         <div className="turn-files">
-          <span className="turn-files-label">本輪變動：</span>
+          <span className="turn-files-label">Changed this turn:</span>
           {unit.files.map((f) => (
             <button key={f.id} type="button" className="btn ghost small turn-file" title={f.path} onClick={() => onOpenFile(unit.id, f.id)}>
-              {basename(f.path ?? '檔案')}
+              {basename(f.path ?? 'file')}
             </button>
           ))}
         </div>

@@ -97,28 +97,28 @@ export function BlockView({ block, sourceId, parentThreadId, mode = 'markdown', 
         )}
       </div>
       {!readOnly && (
-        <button type="button" className="ask-btn" title="針對這個段落提問" onClick={() => openComposer(block.text)}>
-          提問
+        <button type="button" className="ask-btn" title="Ask about this paragraph" onClick={() => openComposer(block.text)}>
+          Ask
         </button>
       )}
       {!readOnly && selectionAsk && (
         <button
           type="button"
           className="ask-selection"
-          title="針對選取的文字提問"
+          title="Ask about the selected text"
           style={{ top: selectionAsk.top, left: selectionAsk.left }}
           // Keep the text selection alive while clicking.
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => openComposer(selectionAsk.quote)}
         >
-          提問
+          Ask
         </button>
       )}
       {composerQuote !== null && (
         <Composer
           quote={composerQuote === block.text ? undefined : composerQuote}
-          placeholder={parentThreadId ? '針對這段回答提出子問題…' : '針對這段提出問題…'}
-          submitLabel="送出"
+          placeholder={parentThreadId ? 'Ask about this part of the answer…' : 'Ask about this passage…'}
+          submitLabel="Send"
           onSubmit={ask}
           onCancel={() => setComposerQuote(null)}
         />

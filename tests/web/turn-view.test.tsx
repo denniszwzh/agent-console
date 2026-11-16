@@ -17,7 +17,7 @@ describe('TurnView', () => {
     const section = container.querySelector('section.turn')!;
     expect(section.getAttribute('data-unit-id')).toBe('unit-1');
     const text = section.textContent!;
-    expect(text).toContain('你：');
+    expect(text).toContain('You:');
     expect(text.indexOf('幫我寫計畫')).toBeLessThan(text.indexOf('First paragraph.'));
   });
 
@@ -28,7 +28,7 @@ describe('TurnView', () => {
 
   it('shows the count of omitted earlier prompts', () => {
     view(makeUnit({ prompts: [prompt('a'), prompt('b')], promptsOmitted: 2 }));
-    expect(screen.getByText('還有 2 則較早的提問')).toBeTruthy();
+    expect(screen.getByText('2 earlier prompts not shown')).toBeTruthy();
   });
 
   it('folds a long prompt', () => {
@@ -36,14 +36,14 @@ describe('TurnView', () => {
     const { container } = view(makeUnit({ prompts: [prompt(long)] }));
     expect(container.textContent).toContain('line 12');
     expect(container.textContent).not.toContain('line 20');
-    fireEvent.click(screen.getByRole('button', { name: '展開' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
     expect(container.textContent).toContain('line 20');
   });
 
   it('shows the delivery instruction as a marker', () => {
     const { container } = view(makeUnit({ prompts: [prompt('Read the review conclusions in C:\\x.md and apply them.', { delivery: true })] }));
     expect(container.textContent).not.toContain('Read the review conclusions');
-    fireEvent.click(screen.getByRole('button', { name: /帶入審查結論/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Review conclusions applied/ }));
     expect(container.textContent).toContain('Read the review conclusions');
   });
 
@@ -51,15 +51,15 @@ describe('TurnView', () => {
     const unit = makeUnit({ status: 'stale' });
     unit.threads = [makeThread('t1', anchorOn(unit), { status: 'expired' })];
     view(unit, { latest: false });
-    expect(screen.queryAllByRole('button', { name: '提問' })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: 'Ask' })).toHaveLength(0);
     expect(screen.queryByText('已過期：主對話已進入下一輪')).toBeNull();
-    expect(screen.getAllByText('已過期').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Expired').length).toBeGreaterThan(0);
   });
 
   it('open latest turn offers ask buttons', () => {
     const unit = makeUnit();
     view(unit);
-    expect(screen.getAllByRole('button', { name: '提問' })).toHaveLength(unit.reply.blocks.length);
+    expect(screen.getAllByRole('button', { name: 'Ask' })).toHaveLength(unit.reply.blocks.length);
   });
 
   it('lists changed files and opens one', () => {
@@ -72,17 +72,17 @@ describe('TurnView', () => {
 
   it('shows warnings inside the turn', () => {
     view(makeUnit({ warnings: [{ at: '2026-11-15T10:01:00.000Z', threadId: 't1', paths: ['src/a.ts'] }] }));
-    expect(screen.getByText(/問題串執行期間偵測到檔案變動/)).toBeTruthy();
+    expect(screen.getByText(/Files changed while a thread was running/)).toBeTruthy();
     expect(screen.getByText('src/a.ts')).toBeTruthy();
   });
 
   it('shows the add-file hint only on the latest open turn', () => {
     const scanNotice = { omitted: 3, incomplete: false };
     view(makeUnit({ scanNotice }));
-    expect(screen.queryByText(/加入檔案」加入/)).toBeTruthy();
+    expect(screen.queryByText(/with \+ Add file/)).toBeTruthy();
     cleanup();
     view(makeUnit({ scanNotice, status: 'stale' }), { latest: false });
-    expect(screen.queryByText(/這一輪還有 3 個/)).toBeTruthy();
-    expect(screen.queryByText(/加入檔案」加入/)).toBeNull();
+    expect(screen.queryByText(/3 more changed files/)).toBeTruthy();
+    expect(screen.queryByText(/with \+ Add file/)).toBeNull();
   });
 });

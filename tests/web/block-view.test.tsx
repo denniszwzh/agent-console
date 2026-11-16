@@ -28,12 +28,12 @@ describe('BlockView selection questions', () => {
     const actions = fakeActions();
     render(<TurnView unit={unit} actions={actions} latest turnNumber={1} onOpenFile={() => {}} />);
     selectStartOf(screen.getByText('First paragraph.'), 5);
-    fireEvent.click(screen.getByTitle('針對選取的文字提問'));
-    const textarea = screen.getByPlaceholderText('針對這段提出問題…');
+    fireEvent.click(screen.getByTitle('Ask about the selected text'));
+    const textarea = screen.getByPlaceholderText('Ask about this passage…');
     expect(document.activeElement).toBe(textarea);
     fireEvent.change(textarea, { target: { value: 'Why first?' } });
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '送出' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     });
     const block = unit.reply.blocks[1];
     expect(actions.addThread).toHaveBeenCalledWith(
@@ -46,12 +46,12 @@ describe('BlockView selection questions', () => {
   it('hides the selection button once the selection collapses', () => {
     render(<TurnView unit={makeUnit()} actions={fakeActions()} latest turnNumber={1} onOpenFile={() => {}} />);
     selectStartOf(screen.getByText('First paragraph.'), 5);
-    expect(screen.queryByTitle('針對選取的文字提問')).not.toBeNull();
+    expect(screen.queryByTitle('Ask about the selected text')).not.toBeNull();
     act(() => {
       window.getSelection()!.removeAllRanges();
       document.dispatchEvent(new Event('selectionchange'));
     });
-    expect(screen.queryByTitle('針對選取的文字提問')).toBeNull();
+    expect(screen.queryByTitle('Ask about the selected text')).toBeNull();
   });
 
   it('requests local images together with the source that references them', () => {

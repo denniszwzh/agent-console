@@ -66,8 +66,8 @@ function LocalImage({ node, alt }: { node?: any; alt?: string }) {
     return <img src={imageUrl(raw)} alt={alt ?? ''} loading="lazy" />;
   }
   return (
-    <span className="img-blocked" title="外部圖片不會載入">
-      [圖片：{alt || '未命名'}]
+    <span className="img-blocked" title="External images are not loaded">
+      [Image: {alt || 'untitled'}]
     </span>
   );
 }
@@ -87,7 +87,7 @@ const components: Components = {
     if (lang === 'svg') {
       return (
         <figure className="svg-figure">
-          <img src={svgDataUrl(text)} alt="SVG 圖片" />
+          <img src={svgDataUrl(text)} alt="SVG image" />
         </figure>
       );
     }

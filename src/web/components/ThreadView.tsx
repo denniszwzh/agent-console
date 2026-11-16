@@ -25,11 +25,11 @@ export function ThreadView({ thread, blockText }: Props) {
   const { status } = thread;
 
   return (
-    <section className={`thread status-${status}`} aria-label="問題串">
+    <section className={`thread status-${status}`} aria-label="Thread">
       <header className="thread-head">
         <button type="button" className="thread-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
           <span aria-hidden="true">{open ? '▾' : '▸'}</span>
-          <span className="sr-only">{open ? '收合' : '展開'}</span>
+          <span className="sr-only">{open ? 'Collapse' : 'Expand'}</span>
         </button>
         <StatusPill status={status} />
         {!open && <span className="thread-summary">{firstLine(question, 80)}</span>}
@@ -52,12 +52,12 @@ export function ThreadView({ thread, blockText }: Props) {
               </div>
             ),
           )}
-          {status === 'answering' && <div className="thread-busy">回答中…</div>}
-          {status === 'error' && <div className="thread-error">執行失敗：{thread.error ?? '未知錯誤'}</div>}
+          {status === 'answering' && <div className="thread-busy">Answering…</div>}
+          {status === 'error' && <div className="thread-error">Failed: {thread.error ?? 'unknown error'}</div>}
           {status === 'resolved' && (
             <div className="thread-conclusion">
-              <span className="label">結論</span>
-              {thread.noConclusion || thread.conclusion === null ? '（無結論）' : thread.conclusion}
+              <span className="label">Conclusion</span>
+              {thread.noConclusion || thread.conclusion === null ? '(no conclusion)' : thread.conclusion}
             </div>
           )}
           {!readOnly && (
@@ -65,29 +65,29 @@ export function ThreadView({ thread, blockText }: Props) {
               {status === 'draft' && (
                 <>
                   <button type="button" className="btn primary" onClick={() => fire(actions.sendThread(thread.id))}>
-                    送出
+                    Send
                   </button>
                   <button type="button" className="btn ghost" onClick={() => fire(actions.deleteThread(thread.id))}>
-                    刪除
+                    Delete
                   </button>
                 </>
               )}
               {status === 'error' && (
                 <button type="button" className="btn" onClick={() => fire(actions.retry(thread.id))}>
-                  重試
+                  Retry
                 </button>
               )}
               {(status === 'awaiting' || status === 'resolved') && !composing && (
                 <button type="button" className="btn" onClick={() => setComposing(true)}>
-                  追問
+                  Follow up
                 </button>
               )}
             </div>
           )}
           {!readOnly && composing && (
             <Composer
-              placeholder="在這個問題串裡追問…"
-              submitLabel="送出"
+              placeholder="Follow up in this thread…"
+              submitLabel="Send"
               onSubmit={async (text) => {
                 await actions.followUp(thread.id, text);
                 setComposing(false);

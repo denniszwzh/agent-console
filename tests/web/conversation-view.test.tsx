@@ -61,22 +61,22 @@ describe('ConversationView', () => {
   it('renders turns oldest first with the stream tab selected', () => {
     view(turns(3));
     expect(sections().map((s) => s.dataset.unitId)).toEqual(['u0', 'u1', 'u2']);
-    expect(screen.getByRole('tab', { name: /對話/ }).getAttribute('aria-selected')).toBe('true');
-    expect(screen.getByText(/對話開始於/)).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /Conversation/ }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByText(/Conversation started/)).toBeTruthy();
   });
 
   it('only the latest open turn offers actions', () => {
     const units = turns(2);
     view(units);
-    expect(screen.getAllByRole('button', { name: '提問' })).toHaveLength(units[1].reply.blocks.length);
-    expect(screen.getAllByRole('button', { name: /整合結論/ })).toHaveLength(1);
-    expect(screen.getAllByRole('button', { name: /加入檔案/ })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Ask' })).toHaveLength(units[1].reply.blocks.length);
+    expect(screen.getAllByRole('button', { name: /Integrate conclusions/ })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /Add file/ })).toHaveLength(1);
   });
 
   it('no conclusion bar when the latest turn is stale', () => {
     view(turns(2, false));
-    expect(screen.queryByRole('button', { name: /整合結論/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /加入檔案/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Integrate conclusions/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Add file/ })).toBeNull();
   });
 
   it("tabs list the latest turn's files with the threads still being answered", () => {
@@ -90,7 +90,7 @@ describe('ConversationView', () => {
       makeThread('t5', { ...anchorOn(unit), sourceId: 'f1' }),
     ];
     view([unit]);
-    expect(screen.getByRole('tab', { name: /對話\s*1/ })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /Conversation\s*1/ })).toBeTruthy();
     expect(screen.getByRole('tab', { name: /x\.ts\s*2/ })).toBeTruthy();
   });
 
@@ -102,9 +102,9 @@ describe('ConversationView', () => {
     ];
     view([unit]);
     fireEvent.click(screen.getByRole('tab', { name: 'shell.ts' }));
-    expect(screen.getByText(/比對這一輪的 git 狀態找到的/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: /^guess\.ts\s*可能$/ }));
-    expect(screen.getByText(/可能由這一輪產生/)).toBeTruthy();
+    expect(screen.getByText(/found by comparing this turn's git status/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: /^guess\.ts\s*maybe$/ }));
+    expect(screen.getByText(/Possibly from this turn/)).toBeTruthy();
   });
 
   it("opening an older turn's file adds a closable tab", () => {
@@ -112,12 +112,12 @@ describe('ConversationView', () => {
     units[0].files = [{ id: 'old-f', kind: 'file', path: 'docs/old.md', content: '# Old', blocks: [] }];
     view(units);
     fireEvent.click(screen.getByRole('button', { name: 'old.md' }));
-    const tab = screen.getByRole('tab', { name: /old\.md（第 1 輪）/ });
+    const tab = screen.getByRole('tab', { name: /old\.md \(turn 1\)/ });
     expect(tab.getAttribute('aria-selected')).toBe('true');
     expect(stream().hidden).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: '關閉 old.md' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close old.md' }));
     expect(screen.queryByRole('tab', { name: /old\.md/ })).toBeNull();
-    expect(screen.getByRole('tab', { name: /對話/ }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: /Conversation/ }).getAttribute('aria-selected')).toBe('true');
   });
 
   it('opening a latest-turn file selects its existing tab', () => {
@@ -139,7 +139,7 @@ describe('ConversationView', () => {
     onAnchorChange.mockClear();
     fireEvent.scroll(stream());
     expect(onAnchorChange).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('tab', { name: /對話/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Conversation/ }));
     expect(stream().scrollTop).toBe(420);
   });
 
@@ -147,15 +147,15 @@ describe('ConversationView', () => {
     const units = turns(10);
     const { rerender } = view(units);
     scrollTo(420);
-    fireEvent.click(screen.getByRole('button', { name: /加入檔案/ }));
-    fireEvent.change(screen.getByPlaceholderText(/檔案路徑/), { target: { value: 'src/added.ts' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add file/ }));
+    fireEvent.change(screen.getByPlaceholderText(/File path/), { target: { value: 'src/added.ts' } });
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '加入' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     });
     const latest = { ...units[9], files: [{ id: 'added', kind: 'file' as const, path: 'src/added.ts', content: 'x', blocks: [] }] };
     rerender(<ConversationView session={session} units={[...units.slice(0, 9), latest]} actionsFor={actionsFor} />);
     expect(screen.getByRole('tab', { name: 'added.ts' }).getAttribute('aria-selected')).toBe('true');
-    fireEvent.click(screen.getByRole('tab', { name: /對話/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Conversation/ }));
     expect(stream().scrollTop).toBe(420);
   });
 
@@ -193,7 +193,7 @@ describe('ConversationView', () => {
 
   it('loads earlier turns from the start button', () => {
     view(turns(35));
-    fireEvent.click(screen.getByRole('button', { name: '載入更早的對話' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Load earlier turns' }));
     expect(sections()).toHaveLength(35);
   });
 
@@ -207,7 +207,7 @@ describe('ConversationView', () => {
     const { rerender } = view(units);
     rerender(<ConversationView session={session} units={[...units, turn(10)]} actionsFor={actionsFor} />);
     expect(stream().scrollTop).toBe(11 * 100 + 50);
-    expect(screen.queryByRole('button', { name: /新回覆/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /New reply/ })).toBeNull();
   });
 
   it("keeps the reader's text in place when a new turn arrives while scrolled up", () => {
@@ -218,9 +218,9 @@ describe('ConversationView', () => {
     rerender(<ConversationView session={session} units={[...units, turn(35)]} actionsFor={actionsFor} />);
     expect(sections()[0].dataset.unitId).toBe(first);
     expect(stream().scrollTop).toBe(800);
-    fireEvent.click(screen.getByRole('button', { name: /新回覆/ }));
+    fireEvent.click(screen.getByRole('button', { name: /New reply/ }));
     expect(stream().scrollTop).toBe(31 * 100 + 50);
-    expect(screen.queryByRole('button', { name: /新回覆/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /New reply/ })).toBeNull();
   });
 
   it('stays pinned to the bottom while content grows', () => {

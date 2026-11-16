@@ -254,21 +254,21 @@ function ZoomFrame({ url, alt, size, fit, className, actions }: FrameProps) {
 
   return (
     <div className={className}>
-      <div className="diagram-toolbar" role="group" aria-label="圖表工具">
-        <button type="button" className="diagram-btn" aria-label="縮小" title="縮小（-、Ctrl + 滾輪）" onClick={() => zoomBy(1 / ZOOM_STEP)}>
+      <div className="diagram-toolbar" role="group" aria-label="Diagram tools">
+        <button type="button" className="diagram-btn" aria-label="Zoom out" title="Zoom out (-, Ctrl + wheel)" onClick={() => zoomBy(1 / ZOOM_STEP)}>
           −
         </button>
         <button
           type="button"
           className="diagram-btn diagram-zoom"
-          aria-label={`${percent}，符合大小`}
-          title="符合大小（0、按兩下圖表）"
+          aria-label={`${percent}, fit to view`}
+          title="Fit to view (0, or double-click the diagram)"
           onClick={fitToFrame}
         >
           {percent}
         </button>
-        <button type="button" className="diagram-btn" aria-label="放大" title="放大（+、Ctrl + 滾輪）" onClick={() => zoomBy(ZOOM_STEP)}>
-          ＋
+        <button type="button" className="diagram-btn" aria-label="Zoom in" title="Zoom in (+, Ctrl + wheel)" onClick={() => zoomBy(ZOOM_STEP)}>
+          +
         </button>
         {actions}
       </div>
@@ -277,8 +277,8 @@ function ZoomFrame({ url, alt, size, fit, className, actions }: FrameProps) {
         className={`diagram-frame${zoomed ? ' zoomed' : ''}${panning ? ' panning' : ''}`}
         style={frameHeight ? { height: `${frameHeight}px` } : undefined}
         role="group"
-        aria-roledescription="可移動的圖表"
-        aria-label="拖曳或用方向鍵移動，+ / - 縮放，0 符合大小"
+        aria-roledescription="movable diagram"
+        aria-label="Drag or use the arrow keys to move, + / - to zoom, 0 to fit"
         tabIndex={0}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -319,7 +319,7 @@ function downloadSvg(svg: string): void {
 
 function DownloadButton({ svg }: { svg: string }) {
   return (
-    <button type="button" className="diagram-btn" aria-label="下載 SVG" title="下載 SVG" onClick={() => downloadSvg(svg)}>
+    <button type="button" className="diagram-btn" aria-label="Download SVG" title="Download SVG" onClick={() => downloadSvg(svg)}>
       ⤓
     </button>
   );
@@ -361,20 +361,20 @@ function FullScreen({ svg, url, size, onClose }: { svg: string; url: string; siz
       className="diagram-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label="Mermaid 圖表（全螢幕）"
+      aria-label="Mermaid diagram (full screen)"
       onPointerDown={onBackdropDown}
       onClick={onBackdropClick}
     >
       <ZoomFrame
         url={url}
-        alt="Mermaid 圖表"
+        alt="Mermaid diagram"
         size={size}
         fit="contain"
         className="diagram diagram-full"
         actions={
           <>
             <DownloadButton svg={svg} />
-            <button ref={closeRef} type="button" className="diagram-btn" aria-label="關閉全螢幕" title="關閉（Esc）" onClick={onClose}>
+            <button ref={closeRef} type="button" className="diagram-btn" aria-label="Close full screen" title="Close (Esc)" onClick={onClose}>
               ✕
             </button>
           </>
@@ -406,8 +406,8 @@ export function DiagramViewer({ svg, code }: { svg: string; code: string }) {
       type="button"
       className="diagram-btn"
       aria-pressed={showSource}
-      aria-label="顯示原始碼"
-      title={showSource ? '顯示圖表' : '顯示原始碼'}
+      aria-label="Show source"
+      title={showSource ? 'Show diagram' : 'Show source'}
       onClick={() => setShowSource((v) => !v)}
     >
       {'</>'}
@@ -418,7 +418,7 @@ export function DiagramViewer({ svg, code }: { svg: string; code: string }) {
     <figure className="mermaid">
       {showSource ? (
         <div className="diagram">
-          <div className="diagram-toolbar" role="group" aria-label="圖表工具">
+          <div className="diagram-toolbar" role="group" aria-label="Diagram tools">
             {sourceToggle}
           </div>
           <pre className="diagram-source">
@@ -428,7 +428,7 @@ export function DiagramViewer({ svg, code }: { svg: string; code: string }) {
       ) : (
         <ZoomFrame
           url={url}
-          alt="Mermaid 圖表"
+          alt="Mermaid diagram"
           size={size}
           fit="width"
           className="diagram"
@@ -436,7 +436,7 @@ export function DiagramViewer({ svg, code }: { svg: string; code: string }) {
             <>
               {sourceToggle}
               <DownloadButton svg={svg} />
-              <button ref={fullRef} type="button" className="diagram-btn" aria-label="全螢幕" title="全螢幕" onClick={() => setFull(true)}>
+              <button ref={fullRef} type="button" className="diagram-btn" aria-label="Full screen" title="Full screen" onClick={() => setFull(true)}>
                 ⛶
               </button>
             </>

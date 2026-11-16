@@ -7,10 +7,10 @@ const ago = (ms: number) => new Date(T0 - ms).toISOString();
 
 describe('formatRelative', () => {
   it('says how long ago, in the largest whole unit', () => {
-    expect(formatRelative(ago(30_000), T0)).toBe('剛剛');
-    expect(formatRelative(ago(5 * 60_000), T0)).toBe('5 分鐘前');
-    expect(formatRelative(ago(3 * 3600_000), T0)).toBe('3 小時前');
-    expect(formatRelative(ago(2 * 86400_000), T0)).toBe('2 天前');
+    expect(formatRelative(ago(30_000), T0)).toBe('just now');
+    expect(formatRelative(ago(5 * 60_000), T0)).toBe('5 min ago');
+    expect(formatRelative(ago(3 * 3600_000), T0)).toBe('3 h ago');
+    expect(formatRelative(ago(2 * 86400_000), T0)).toBe('2 d ago');
   });
 
   it('falls back to the date after 30 days', () => {
@@ -18,7 +18,7 @@ describe('formatRelative', () => {
   });
 
   it('treats future times as now and invalid ones as empty', () => {
-    expect(formatRelative(ago(-10_000), T0)).toBe('剛剛');
+    expect(formatRelative(ago(-10_000), T0)).toBe('just now');
     expect(formatRelative('bad', T0)).toBe('');
   });
 });

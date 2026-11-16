@@ -115,10 +115,10 @@ describe('SessionSwitcher', () => {
     const [first, second] = rows();
     expect(first.textContent).toContain('K棒反向交易功能');
     expect(first.textContent).toContain('C:\\Projects\\stock');
-    expect(first.textContent).toContain(`建立 ${formatTime(s1.createdAt!)}`);
-    expect(first.textContent).toContain('5 分鐘前');
+    expect(first.textContent).toContain(`Started ${formatTime(s1.createdAt!)}`);
+    expect(first.textContent).toContain('5 min ago');
     expect(second.textContent).toContain('agent-console');
-    expect(second.textContent).toContain('2 小時前');
+    expect(second.textContent).toContain('2 h ago');
   });
 
   it('shows live status', () => {
@@ -132,14 +132,14 @@ describe('SessionSwitcher', () => {
       <SessionSwitcher sessions={[s1, s2]} unitsBySession={units} activity={[responding(ago(83_000))]} selectedSession={null} onSelect={() => {}} />,
     );
     const [r1, r2] = rows();
-    expect(r1.textContent).toContain('回應中');
+    expect(r1.textContent).toContain('Responding');
     expect(r1.textContent).toContain('1:23');
     expect(r1.textContent).not.toContain('未結');
-    expect(r1.textContent).toContain('審查中');
-    expect(r2.textContent).toContain('問題串回答中');
-    expect(r2.textContent).toContain('已送出');
+    expect(r1.textContent).toContain('In review');
+    expect(r2.textContent).toContain('thread answering');
+    expect(r2.textContent).toContain('Sent');
     rerender(<SessionSwitcher sessions={[s1, s2]} unitsBySession={units} activity={[]} selectedSession={null} onSelect={() => {}} />);
-    expect(rows()[0].textContent).not.toContain('回應中');
+    expect(rows()[0].textContent).not.toContain('Responding');
   });
 
   it('marks the current session and selects on click', () => {
@@ -161,11 +161,11 @@ describe('SessionSwitcher', () => {
   it('refreshes relative times every minute', () => {
     vi.useFakeTimers({ now: T0 });
     render(<SessionSwitcher sessions={[s1]} unitsBySession={{}} activity={[]} selectedSession={null} onSelect={() => {}} />);
-    expect(rows()[0].textContent).toContain('5 分鐘前');
+    expect(rows()[0].textContent).toContain('5 min ago');
     act(() => {
       vi.advanceTimersByTime(60_000);
     });
-    expect(rows()[0].textContent).toContain('6 分鐘前');
+    expect(rows()[0].textContent).toContain('6 min ago');
   });
 
   it('shows a first prompt as a softer title', () => {

@@ -11,9 +11,9 @@ afterEach(() => {
 
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" style="max-width: 400px;"><rect width="10" height="10"/></svg>';
 const CODE = 'flowchart TB\n  A --> B';
-const img = () => screen.getByRole('img', { name: 'Mermaid 圖表' }) as HTMLImageElement;
+const img = () => screen.getByRole('img', { name: 'Mermaid diagram' }) as HTMLImageElement;
 const frame = () => img().parentElement as HTMLDivElement;
-const fitButton = () => screen.getByRole('button', { name: /符合大小/ }) as HTMLButtonElement;
+const fitButton = () => screen.getByRole('button', { name: /fit to view/ }) as HTMLButtonElement;
 
 /** jsdom has no layout: give every element this width while `fn` runs. */
 function withFrameWidth(width: number, fn: () => void) {
@@ -59,13 +59,13 @@ describe('DiagramViewer', () => {
     render(<DiagramViewer svg={SVG} code={CODE} />);
     expect(img().style.width).toBe('400px');
 
-    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
     expect(img().style.width).toBe('500px');
     expect(fitButton().textContent).toBe('125%');
-    expect(fitButton().getAttribute('aria-label')).toBe('125%，符合大小');
+    expect(fitButton().getAttribute('aria-label')).toBe('125%, fit to view');
 
-    fireEvent.click(screen.getByRole('button', { name: '縮小' }));
-    fireEvent.click(screen.getByRole('button', { name: '縮小' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
     expect(img().style.width).toBe('320px');
 
     fireEvent.click(fitButton());
@@ -74,9 +74,9 @@ describe('DiagramViewer', () => {
 
   it('keeps zoom within its bounds', () => {
     render(<DiagramViewer svg={SVG} code={CODE} />);
-    for (let i = 0; i < 30; i++) fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    for (let i = 0; i < 30; i++) fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
     expect(img().style.width).toBe('2000px');
-    for (let i = 0; i < 40; i++) fireEvent.click(screen.getByRole('button', { name: '縮小' }));
+    for (let i = 0; i < 40; i++) fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
     expect(img().style.width).toBe('40px');
   });
 
@@ -215,9 +215,9 @@ describe('DiagramViewer', () => {
   it('a zoom press at the limit leaves the view where it is', () => {
     withFrameWidth(600, () => {
       render(<DiagramViewer svg={SVG} code={CODE} />);
-      for (let i = 0; i < 30; i++) fireEvent.click(screen.getByRole('button', { name: '放大' }));
+      for (let i = 0; i < 30; i++) fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
       const before = pos();
-      fireEvent.click(screen.getByRole('button', { name: '放大' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
       expect(pos()).toEqual(before);
     });
   });
@@ -230,7 +230,7 @@ describe('DiagramViewer', () => {
       f.dispatchEvent(atFit);
       expect(atFit.defaultPrevented).toBe(false);
 
-      fireEvent.click(screen.getByRole('button', { name: '放大' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
       const [x0, y0] = pos();
       const down = new WheelEvent('wheel', { deltaY: 40, bubbles: true, cancelable: true });
       fireEvent(f, down);
@@ -293,17 +293,17 @@ describe('DiagramViewer', () => {
       render(<DiagramViewer svg={wide} code={CODE} />);
       // (332 - 32) / 6000 = 5%
       expect(img().style.width).toBe('300px');
-      fireEvent.click(screen.getByRole('button', { name: '縮小' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
       expect(img().style.width).toBe('300px');
     });
   });
 
   it('shows the source instead of the diagram and back', () => {
     render(<DiagramViewer svg={SVG} code={CODE} />);
-    fireEvent.click(screen.getByRole('button', { name: '顯示原始碼' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show source' }));
     expect(screen.getByText(/flowchart TB/)).toBeTruthy();
     expect(screen.queryByRole('img')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: '顯示原始碼' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show source' }));
     expect(img()).toBeTruthy();
   });
 
@@ -316,7 +316,7 @@ describe('DiagramViewer', () => {
       clicks.push(this);
     });
     render(<DiagramViewer svg={SVG} code={CODE} />);
-    fireEvent.click(screen.getByRole('button', { name: '下載 SVG' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download SVG' }));
     expect(create).toHaveBeenCalledTimes(1);
     const blob = (create.mock.calls[0] as unknown as [Blob])[0];
     expect(blob.type).toBe('image/svg+xml');
@@ -331,11 +331,11 @@ describe('DiagramViewer', () => {
     root.id = 'root';
     document.body.appendChild(root);
     render(<DiagramViewer svg={SVG} code={CODE} />, { container: root });
-    const open = screen.getByRole('button', { name: '全螢幕' });
+    const open = screen.getByRole('button', { name: 'Full screen' });
     fireEvent.click(open);
-    expect(screen.getByRole('dialog', { name: 'Mermaid 圖表（全螢幕）' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Mermaid diagram (full screen)' })).toBeTruthy();
     expect(root.hasAttribute('inert')).toBe(true);
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: '關閉全螢幕' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close full screen' }));
 
     const pageKeys = vi.fn();
     window.addEventListener('keydown', pageKeys);
@@ -347,7 +347,7 @@ describe('DiagramViewer', () => {
     expect(document.activeElement).toBe(open);
 
     fireEvent.click(open);
-    fireEvent.click(screen.getByRole('button', { name: '關閉全螢幕' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close full screen' }));
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(open);
 
@@ -367,7 +367,7 @@ describe('DiagramViewer', () => {
     root.id = 'root';
     document.body.appendChild(root);
     const { unmount } = render(<DiagramViewer svg={SVG} code={CODE} />, { container: root });
-    fireEvent.click(screen.getByRole('button', { name: '全螢幕' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Full screen' }));
     unmount();
     expect(root.hasAttribute('inert')).toBe(false);
     expect(document.querySelector('.diagram-overlay')).toBeNull();

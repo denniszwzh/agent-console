@@ -70,8 +70,8 @@ const TASK_NOTICE = /^<task-notification[\s>]/;
 export function previewOf(prompt: string | undefined): string | undefined {
   if (!prompt) return undefined;
   const raw = prompt.trim();
-  if (PEER_MESSAGE.test(raw)) return '其他工作階段傳來的訊息';
-  if (TASK_NOTICE.test(raw)) return '背景工作完成通知';
+  if (PEER_MESSAGE.test(raw)) return 'Message from another session';
+  if (TASK_NOTICE.test(raw)) return 'Background task finished';
   const cleaned = cleanPromptText(prompt);
   if (!cleaned) return undefined;
   const t = (cleaned.split(/\r?\n/).find((l) => l.trim()) ?? '').trim();

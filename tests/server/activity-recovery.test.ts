@@ -49,7 +49,7 @@ describe('openTurnIn (Claude)', () => {
 
   it('a message from another session starts a turn, labelled', () => {
     const lines = [stopSummary('2026-11-16T01:00:00.000Z'), peer('2026-11-16T02:00:00.000Z'), assistant('tool_use', '2026-11-16T02:00:01.000Z')];
-    expect(openTurnIn('claude', lines)).toEqual({ since: '2026-11-16T02:00:00.000Z', prompt: '其他工作階段傳來的訊息' });
+    expect(openTurnIn('claude', lines)).toEqual({ since: '2026-11-16T02:00:00.000Z', prompt: 'Message from another session' });
   });
 
   it('shell-mode, local command, compact and sidechain records do not start a turn', () => {
@@ -169,7 +169,7 @@ describe('recoverActivity', () => {
 
   it('marks a session whose transcript has an open turn after its last reply as responding', async () => {
     const f = transcript('a', 60_000);
-    const { store, tracker, run } = setup({ [f]: { since: '2026-11-16T02:04:40.000Z', prompt: '其他工作階段傳來的訊息' } }, { a: f });
+    const { store, tracker, run } = setup({ [f]: { since: '2026-11-16T02:04:40.000Z', prompt: 'Message from another session' } }, { a: f });
     store.save(unit('a', '2026-11-16T01:51:05.000Z'));
     expect(await run()).toBe(1);
     expect(tracker.list()).toEqual([
@@ -179,7 +179,7 @@ describe('recoverActivity', () => {
         cwd: 'C:/w/a',
         since: '2026-11-16T02:04:40.000Z',
         lastChange: new Date(NOW - 60_000).toISOString(),
-        prompt: '其他工作階段傳來的訊息',
+        prompt: 'Message from another session',
       },
     ]);
     expect(tracker.transcriptPathFor('a')).toBe(f);
@@ -221,9 +221,9 @@ describe('ActivityTracker prompt preview', () => {
       tracker.start({ sessionId: 's', agent: 'claude', prompt });
       return tracker.list()[0].prompt;
     };
-    expect(preview('<agent-message from="abc">\n[Subagent hand-back] done')).toBe('其他工作階段傳來的訊息');
-    expect(preview('Another Claude session sent a message: <agent-message from="abc">')).toBe('其他工作階段傳來的訊息');
-    expect(preview('<task-notification>\n<task-id>1</task-id>')).toBe('背景工作完成通知');
+    expect(preview('<agent-message from="abc">\n[Subagent hand-back] done')).toBe('Message from another session');
+    expect(preview('Another Claude session sent a message: <agent-message from="abc">')).toBe('Message from another session');
+    expect(preview('<task-notification>\n<task-id>1</task-id>')).toBe('Background task finished');
     expect(preview('<system-reminder>\nx\n</system-reminder>\n修正錯誤')).toBe('修正錯誤');
     expect(preview('<pasted_content id="1">\n貼上的需求\n</pasted_content>')).toBe('貼上的需求');
     tracker.close();

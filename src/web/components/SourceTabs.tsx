@@ -29,26 +29,26 @@ export function SourceTabs({ tabs, activeId, onSelect, onClose, leading, trailin
   return (
     <nav className="tabs">
       {leading}
-      <div role="tablist" aria-label="審查內容" className="tab-list">
+      <div role="tablist" aria-label="Review content" className="tab-list">
         {tabs.map((t) => (
           <span key={t.id} className={`tab-wrap${t.closable ? ' closable' : ''}`}>
             <button type="button" role="tab" aria-selected={t.id === activeId} className="tab" title={t.title} onClick={() => onSelect(t.id)}>
               <span className="tab-label">{t.label}</span>
               {t.guess && (
-                <span className="tab-guess" title="依修改時間找到，不一定是 agent 改的">
+                <span className="tab-guess" title="Found by modification time; the agent may not have changed it">
                   {' '}
-                  可能
+                  maybe
                 </span>
               )}
               {t.count !== undefined && t.count > 0 && (
-                <span className="tab-count" title={`${t.count} 串正在回答`}>
+                <span className="tab-count" title={`${t.count} being answered`}>
                   {' '}
                   {t.count}
                 </span>
               )}
             </button>
             {t.closable && onClose && (
-              <button type="button" className="tab-close" aria-label={t.closeLabel ?? `關閉 ${t.label}`} onClick={() => onClose(t.id)}>
+              <button type="button" className="tab-close" aria-label={t.closeLabel ?? `Close ${t.label}`} onClick={() => onClose(t.id)}>
                 ×
               </button>
             )}
@@ -60,7 +60,7 @@ export function SourceTabs({ tabs, activeId, onSelect, onClose, leading, trailin
   );
 }
 
-/** "+ 加入檔案" for the unit in context; render it inside that unit's UnitProvider. */
+/** "+ Add file" for the unit in context; render it inside that unit's UnitProvider. */
 export function AddFileButton({ onAdding }: { onAdding(): void }) {
   const { unit, readOnly, actions } = useUnit();
   const [adding, setAdding] = useState(false);
@@ -89,20 +89,20 @@ export function AddFileButton({ onAdding }: { onAdding(): void }) {
       <input
         autoFocus
         value={path}
-        placeholder={`檔案路徑（相對於 ${unit.cwd}）`}
+        placeholder={`File path (relative to ${unit.cwd})`}
         onChange={(e) => setPath(e.target.value)}
         onKeyDown={(e) => e.key === 'Escape' && setAdding(false)}
       />
       <button type="submit" className="btn primary" disabled={!path.trim() || busy}>
-        加入
+        Add
       </button>
       <button type="button" className="btn ghost" onClick={() => setAdding(false)}>
-        取消
+        Cancel
       </button>
     </form>
   ) : (
     <button type="button" className="btn ghost add-file-btn" onClick={() => setAdding(true)}>
-      ＋ 加入檔案
+      + Add file
     </button>
   );
 }

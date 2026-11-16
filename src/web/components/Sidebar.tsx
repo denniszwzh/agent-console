@@ -41,13 +41,13 @@ export function Sidebar({ sessions, responding, unitsBySession, selectedSession,
       <div className="sidebar-title">
         <span>Agent Console</span>
         {onHide && (
-          <button type="button" className="btn ghost small sidebar-hide" aria-label="隱藏側欄" title="隱藏側欄" onClick={onHide}>
+          <button type="button" className="btn ghost small sidebar-hide" aria-label="Hide sidebar" title="Hide sidebar" onClick={onHide}>
             «
           </button>
         )}
       </div>
       {sessions.length === 0 && (
-        <p className="sidebar-empty">還沒有任何回覆。在 terminal 跟 agent 對話後，回覆會出現在這裡。</p>
+        <p className="sidebar-empty">No replies yet. Talk to Claude Code or Codex in the terminal and the replies show up here.</p>
       )}
       <ul className="project-list">
         {groups.map((g) => {
@@ -60,7 +60,7 @@ export function Sidebar({ sessions, responding, unitsBySession, selectedSession,
                   {isOpen ? '▾' : '▸'}
                 </span>
                 <span className="project-name">{g.name}</span>
-                {open > 0 && <span className="open-count">{open} 串回答中</span>}
+                {open > 0 && <span className="open-count">{open} answering</span>}
               </button>
               {isOpen && (
                 <ul className="session-list">
@@ -86,14 +86,14 @@ export function Sidebar({ sessions, responding, unitsBySession, selectedSession,
                             </span>
                           </span>
                           {responding?.has(s.sessionId) && (
-                            <span className="responding-badge" title="主對話正在回應">
+                            <span className="responding-badge" title="Main session is responding">
                               <span className="responding-dot" aria-hidden="true" />
-                              回應中
+                              Responding
                             </span>
                           )}
                           {sessionOpen > 0 && (
-                            <span className="open-count" title={`${sessionOpen} 個問題串正在回答`}>
-                              {sessionOpen} 串回答中
+                            <span className="open-count" title={`${sessionOpen} ${sessionOpen === 1 ? 'thread' : 'threads'} being answered`}>
+                              {sessionOpen} answering
                             </span>
                           )}
                         </button>

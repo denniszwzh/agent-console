@@ -44,9 +44,9 @@ export function Composer({ quote, placeholder, submitLabel, onSubmit, onCancel }
         onKeyDown={onKeyDown}
       />
       <div className="composer-actions">
-        <span className="hint">Ctrl+Enter 送出 · Esc 取消</span>
+        <span className="hint">Ctrl+Enter to send · Esc to cancel</span>
         <button type="button" className="btn ghost" onClick={onCancel}>
-          取消
+          Cancel
         </button>
         <button type="submit" className="btn primary" disabled={!text.trim() || busy}>
           {submitLabel}

@@ -89,8 +89,8 @@ Keep it running while you work. There is no start-at-login option; start it once
 
 Work in the terminal as usual (`claude` or `codex`, in any project folder). Each time the agent finishes a turn, the
 reply appears in the panel under its project, with the files it changed as tabs. Select text in the reply or a file,
-ask, and press 「送出」; the answer comes from a read-only fork of that session. When you want the main session to
-act on what you found, press 「整合結論」 and then send your next message in the terminal (see "Asking and
+ask, and press **Send**; the answer comes from a read-only fork of that session. When you want the main session to
+act on what you found, press **Integrate conclusions** and then send your next message in the terminal (see "Asking and
 integrating conclusions" and "How the conclusions get back").
 
 ### Update
@@ -136,7 +136,7 @@ what). Forked sessions (`AGENT_CONSOLE_FORK=1`) are ignored by the hooks.
 ## "Responding" status
 
 When you send a prompt in a Claude or Codex session, the `UserPromptSubmit` hook tells the server. The sidebar marks the
-session 「回應中」 (a session with no reply yet is listed too), and a banner above the reply shows the elapsed time and
+session **Responding** (a session with no reply yet is listed too), and a banner above the reply shows the elapsed time and
 the start of the prompt. If the session transcript has not grown for 3 minutes, the banner says the turn may be
 waiting for a permission prompt or may have been interrupted. The `Stop` hook clears the status when the new reply
 arrives. When you interrupt a turn, Codex runs its `Interrupt` hook, which clears the status. Claude Code has no such
@@ -160,7 +160,7 @@ the path the hooks report, else by searching `~/.claude/projects` (or `CLAUDE_CO
 (or `CODEX_HOME`). It reads only the first 256 KB and the last 4 MB of a transcript, then only what is appended.
 
 Hold **Alt** and press **S** to open the quick switcher. It lists every session, the most recently changed first, with
-its name, folder, start time, last change (e.g. 「3 分鐘前」), and live status: 回應中 (with elapsed time), review
+its name, folder, start time, last change (e.g. "3 min ago"), and live status: Responding (with elapsed time), review
 threads being answered, and the state of the latest reply. While still holding Alt, click a session to
 open it. Releasing Alt, pressing Esc, or switching away from the window closes the switcher. The shortcut
 works only while the panel's browser tab has focus.
@@ -174,8 +174,8 @@ panel remembers it). Claude sessions are marked in orange, Codex sessions in gre
 
 Selecting a session shows the whole session as one conversation, like the terminal: each turn's prompts, then the
 agent's reply, oldest first, opened at the bottom. Scrolling up loads earlier turns. A new reply is followed when the
-view is at the bottom; otherwise a 「↓ 新回覆」 button appears. Only the newest turn can be reviewed while it is open:
-its changed files are tabs above the conversation, and 「整合結論」 and 「＋ 加入檔案」 belong to it. Earlier
+view is at the bottom; otherwise a **↓ New reply** button appears. Only the newest turn can be reviewed while it is open:
+its changed files are tabs above the conversation, and **Integrate conclusions** and **+ Add file** belong to it. Earlier
 turns are read-only; their changed files open as temporary tabs.
 
 The prompts come from the agent's transcript. The server reads them when a reply arrives, and fills in earlier
@@ -201,7 +201,7 @@ reported; without it there is no scan):
   scanned, rather than falling back to a walk that would ignore `.gitignore`.
 - Elsewhere: the session folder is walked (at most 20,000 entries or 1 second; `node_modules`, `dist`, `build`,
   `.venv` and similar folders are skipped, and the home folder or a drive root is never walked). These files are
-  marked 「可能」, because a modification time cannot tell who made the change.
+  marked "maybe", because a modification time cannot tell who made the change.
 
 Both ways also pick up files you or another program changed during the turn (a second agent session in the same
 folder included). Symlinks are not followed, secret-looking names (`.env*`, `*.pem`, `*.key`, `*credential*`,
@@ -211,12 +211,12 @@ out and whether the walk ran out of budget. Deleted files are not listed.
 
 ## Asking and integrating conclusions
 
-Select text in a reply, a changed file or an answer (or use 「提問」 on a paragraph), type the question and press
-**送出**: the thread is created and its fork starts answering at once. A question on an answer opens a nested thread,
-forked from that answer's session. In an answered thread, **追問** continues in the same fork. Each thread is sent on
+Select text in a reply, a changed file or an answer (or use **Ask** on a paragraph), type the question and press
+**Send**: the thread is created and its fork starts answering at once. A question on an answer opens a nested thread,
+forked from that answer's session. In an answered thread, **Follow up** continues in the same fork. Each thread is sent on
 its own, whenever you like; there are no drafts to collect first.
 
-Nothing goes back to the main session until you press **整合結論** at the bottom right of the conversation. It can be
+Nothing goes back to the main session until you press **Integrate conclusions** at the bottom right of the conversation. It can be
 pressed when the latest reply is still under review, at least one thread has its answer, and no thread is still being
 answered (the bar says how many are). Agent Console then writes a one-line conclusion for every answered thread,
 reusing each thread's fork (children first, so a parent's conclusion includes its children's), and submits them
@@ -266,7 +266,7 @@ instruction with a copy button; paste it into Codex if the next turn did not pic
   still unsent or being answered at that point are marked expired).
 - Codex: only `apply_patch` edits are detected as changed files, also when Codex applies the patch from code mode
   (read from the rollout's `FileChange` items). Files written by shell commands are found only by the end-of-turn
-  scan (see above); add others with 「+ 加入檔案」. A Codex turn without a rollout path yields no files; deletions (and, in older rollouts without `FileChange` items, the source of a move) are shown as errors. `codex queue` into a running TUI is best effort.
+  scan (see above); add others with **+ Add file**. A Codex turn without a rollout path yields no files; deletions (and, in older rollouts without `FileChange` items, the source of a move) are shown as errors. `codex queue` into a running TUI is best effort.
 - Codex forks fail with a clear error if `codex mcp list` cannot be read or an MCP server name is not a plain
   `[A-Za-z0-9_-]` key (it could not be disabled).
 - Managed (policy) Claude settings outrank the fork's own settings; a managed `disableAllHooks` would turn the guard off.

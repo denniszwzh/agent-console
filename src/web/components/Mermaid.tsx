@@ -115,12 +115,12 @@ export function Mermaid({ code }: { code: string }) {
   if (state.kind === 'error') {
     return (
       <div className="mermaid-error">
-        <div className="mermaid-error-message">Mermaid 圖表無法渲染：{state.message}</div>
+        <div className="mermaid-error-message">Could not render the Mermaid diagram: {state.message}</div>
         <pre>
           <code>{code}</code>
         </pre>
       </div>
     );
   }
-  return <div className="mermaid-loading">圖表載入中…</div>;
+  return <div className="mermaid-loading">Loading diagram…</div>;
 }

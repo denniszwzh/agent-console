@@ -25,7 +25,7 @@ describe('Markdown', () => {
     await waitFor(() => expect(mermaidMock.render).toHaveBeenCalled());
     expect(mermaidMock.render.mock.calls[0][1]).toBe('graph TD; A-->B');
     expect(mermaidMock.initialize).toHaveBeenCalledWith(expect.objectContaining({ securityLevel: 'strict', look: 'neo', theme: 'base', themeVariables: expect.objectContaining({ primaryBorderColor: '#2f6f8f' }) }));
-    const img = await screen.findByRole('img', { name: 'Mermaid 圖表' });
+    const img = await screen.findByRole('img', { name: 'Mermaid diagram' });
     expect(img.getAttribute('src')).toMatch(/^data:image\/svg\+xml;base64,/);
   });
 
@@ -35,7 +35,7 @@ describe('Markdown', () => {
         '<svg xmlns="http://www.w3.org/2000/svg" style="max-width: 120px;"><foreignObject><div xmlns="http://www.w3.org/1999/xhtml"><p>CLI<br>主工作階段</p></div></foreignObject></svg>',
     });
     render(<Markdown content={'```mermaid\nflowchart TB\n  A["CLI<br/>主工作階段"]\n```'} />);
-    const img = await screen.findByRole('img', { name: 'Mermaid 圖表' });
+    const img = await screen.findByRole('img', { name: 'Mermaid diagram' });
     const b64 = img.getAttribute('src')!.split(',')[1];
     const svg = new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
     expect(new DOMParser().parseFromString(svg, 'image/svg+xml').getElementsByTagName('parsererror')).toHaveLength(0);

@@ -178,14 +178,14 @@ export function App() {
   if (unauthorized) {
     return (
       <div className="gate">
-        <h1>尚未授權</h1>
-        <p>請使用啟動 Agent Console 時 terminal 顯示的網址（含 /auth?token=…）開啟面板。</p>
+        <h1>Not signed in</h1>
+        <p>Open the panel with the URL Agent Console printed in the terminal when it started (the one with /auth?token=…).</p>
       </div>
     );
   }
 
   const navToggle = layout.open ? null : (
-    <button type="button" className="btn ghost nav-toggle" aria-label="顯示側欄" title="顯示側欄" onClick={layout.show}>
+    <button type="button" className="btn ghost nav-toggle" aria-label="Show sidebar" title="Show sidebar" onClick={layout.show}>
       ☰
     </button>
   );
@@ -228,9 +228,9 @@ export function App() {
       <div className="main">
         {error && (
           <div className="toast" role="alert">
-            <span>操作失敗：{error}</span>
+            <span>Action failed: {error}</span>
             <button type="button" className="btn ghost small" onClick={() => setError(null)}>
-              關閉
+              Close
             </button>
           </div>
         )}
@@ -249,7 +249,7 @@ export function App() {
           <>
             {navToggle && <div className="tabs">{navToggle}</div>}
             {selectedActivity && <RespondingBanner activity={selectedActivity} />}
-            <div className="placeholder">{!loaded || selected ? '載入中…' : '選擇側欄中的對話開始審查。'}</div>
+            <div className="placeholder">{!loaded || selected ? 'Loading…' : 'Select a conversation in the sidebar to start reviewing.'}</div>
           </>
         )}
       </div>

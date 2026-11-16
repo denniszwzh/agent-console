@@ -14,13 +14,13 @@ function ConclusionItem({ thread }: { thread: Thread }) {
         <span>{firstLine(question, 90)}</span>
       </div>
       <div className="conclusion-text">
-        <span className={text === null ? 'muted' : undefined}>{text ?? '（無結論）'}</span>
+        <span className={text === null ? 'muted' : undefined}>{text ?? '(no conclusion)'}</span>
       </div>
     </li>
   );
 }
 
-/** A copy-to-clipboard button that confirms with 已複製. */
+/** A copy-to-clipboard button that confirms with Copied. */
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -33,7 +33,7 @@ function CopyButton({ text }: { text: string }) {
   };
   return (
     <button type="button" className="btn small" onClick={() => void copy()}>
-      {copied ? '已複製' : '複製'}
+      {copied ? 'Copied' : 'Copy'}
     </button>
   );
 }
@@ -50,12 +50,12 @@ function ClaudeDelivery({ unit }: { unit: ReviewUnit }) {
     <div className="delivery">
       <span>
         {unit.delivered
-          ? '結論已帶入主對話。'
-          : '在 terminal 送出下一則訊息時（例如「套用審查結論」），結論會自動帶入主對話'}
+          ? 'The conclusions were passed to the main session.'
+          : 'They are added to the main session with your next message in the terminal (for example "apply the review conclusions").'}
       </span>
       {unit.conclusionsPath && (
         <>
-          <span>若 session 已 /clear 或關閉，可複製結論檔路徑，請 Claude 讀取並套用：</span>
+          <span>If you ran /clear or closed the session, copy the conclusions file path and ask Claude to read and apply it:</span>
           <code>{unit.conclusionsPath}</code>
           <CopyButton text={unit.conclusionsPath} />
         </>
@@ -68,10 +68,10 @@ function ClaudeDelivery({ unit }: { unit: ReviewUnit }) {
 function CodexDelivery({ unit }: { unit: ReviewUnit }) {
   const instruction = unit.delivery?.instruction;
   // Submitted, but the queue attempt (up to ~10 s) has not reported back yet.
-  if (!instruction) return <div className="delivery muted">正在送入 Codex 佇列…</div>;
+  if (!instruction) return <div className="delivery muted">Queueing in Codex…</div>;
   return (
     <div className="delivery">
-      <span>{unit.delivery?.queued ? '已送入佇列；若下一輪沒有帶入，再複製下面的指令貼到 Codex。' : '貼到 Codex 對話即可套用結論：'}</span>
+      <span>{unit.delivery?.queued ? 'Queued. If the next turn does not pick it up, paste the instruction below into Codex.' : 'Paste this into Codex to apply the conclusions:'}</span>
       <code>{instruction}</code>
       <CopyButton text={instruction} />
     </div>
@@ -90,15 +90,15 @@ export function ConclusionBar() {
 
   let reason = '';
   if (!submitted && !integrating) {
-    if (state.answering > 0) reason = `還有 ${state.answering} 串正在回答`;
-    else if (state.answered === 0) reason = '還沒有已回答的問題串';
+    if (state.answering > 0) reason = `${state.answering} still answering`;
+    else if (state.answered === 0) reason = 'No answered threads yet';
   }
 
   return (
     <footer className="conclusion-bar">
       {submitted && expanded && (
         <ol className="conclusion-list">
-          {concluded.length === 0 && <li className="muted">沒有結論。</li>}
+          {concluded.length === 0 && <li className="muted">No conclusions.</li>}
           {concluded.map((t) => (
             <ConclusionItem key={t.id} thread={t} />
           ))}
@@ -107,14 +107,14 @@ export function ConclusionBar() {
       <div className="bar-row">
         {submitted ? (
           <button type="button" className="btn ghost" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-            {expanded ? '▾' : '▸'} 查看結論（{concluded.length}）
+            {expanded ? '▾' : '▸'} View conclusions ({concluded.length})
           </button>
         ) : integrating ? (
           <span className="bar-status" role="status">
-            正在整合結論…（{state.concluded}/{state.total}）
+            Integrating conclusions… ({state.concluded}/{state.total})
           </span>
         ) : (
-          <span className="bar-status muted">{state.answered > 0 ? `${state.answered} 串已回答` : ''}</span>
+          <span className="bar-status muted">{state.answered > 0 ? `${state.answered} answered` : ''}</span>
         )}
         <span className="spacer" />
         {reason && <span className="bar-reason muted">{reason}</span>}
@@ -123,16 +123,16 @@ export function ConclusionBar() {
             type="button"
             className="btn primary"
             disabled={!state.canIntegrate}
-            title="為每個已回答的問題串整理一行結論，並在下一則訊息帶入主對話"
+            title="Write a one-line conclusion for each answered thread and pass them to the main session with your next message"
             onClick={() => fire(actions.integrate())}
           >
-            {integrating ? '整合中…' : '整合結論'}
+            {integrating ? 'Integrating…' : 'Integrate conclusions'}
           </button>
         )}
       </div>
       {!submitted && !integrating && unit.integrationError && (
         <div className="delivery error" role="alert">
-          整合沒有完成：{unit.integrationError}。可以再按一次「整合結論」，已整理好的結論會保留。
+          Integration did not finish: {unit.integrationError}. Press Integrate conclusions again; conclusions already written are kept.
         </div>
       )}
       {submitted && <DeliveryNotice unit={unit} />}

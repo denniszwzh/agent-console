@@ -53,6 +53,6 @@ describe('groupSessions', () => {
   });
 
   it('labels an empty cwd', () => {
-    expect(groupSessions([s('a', '2026-11-16T05:00:00.000Z', { cwd: '' })], all)[0].name).toBe('（未知資料夾）');
+    expect(groupSessions([s('a', '2026-11-16T05:00:00.000Z', { cwd: '' })], all)[0].name).toBe('(unknown folder)');
   });
 });

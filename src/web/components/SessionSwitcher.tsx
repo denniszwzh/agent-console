@@ -77,12 +77,12 @@ export function SessionSwitcher({ sessions, unitsBySession, activity, selectedSe
 
   return (
     <div className="switcher-backdrop">
-      <div className="switcher" role="dialog" aria-label="切換對話">
+      <div className="switcher" role="dialog" aria-label="Switch conversation">
         <div className="switcher-head">
-          <strong>切換對話</strong>
-          <span className="hint">按著 Alt 點選對話；放開 Alt 關閉</span>
+          <strong>Switch conversation</strong>
+          <span className="hint">Hold Alt and click a conversation; release Alt to close</span>
         </div>
-        {sorted.length === 0 && <p className="switcher-empty">還沒有任何對話。</p>}
+        {sorted.length === 0 && <p className="switcher-empty">No conversations yet.</p>}
         <ul className="switcher-list">
           {sorted.map((s) => {
             const units = unitsBySession[s.sessionId];
@@ -106,10 +106,10 @@ export function SessionSwitcher({ sessions, unitsBySession, activity, selectedSe
                       {act && (
                         <span className="responding-badge">
                           <span className="responding-dot" aria-hidden="true" />
-                          回應中 <Elapsed since={act.since} />
+                          Responding <Elapsed since={act.since} />
                         </span>
                       )}
-                      {answering > 0 && <span className="switcher-answering">{answering} 個問題串回答中</span>}
+                      {answering > 0 && <span className="switcher-answering">{answering} {answering === 1 ? 'thread' : 'threads'} answering</span>}
                       {latest && <span className={`switcher-status status-${latest.status}`}>{UNIT_STATUS_LABELS[latest.status]}</span>}
                     </span>
                   </span>
@@ -117,7 +117,7 @@ export function SessionSwitcher({ sessions, unitsBySession, activity, selectedSe
                     {s.agent} · {s.cwd}
                   </span>
                   <span className="switcher-times">
-                    {created && <>建立 {formatTime(created)} · </>}更改 {formatRelative(lastChanged(s), now)}
+                    {created && <>Started {formatTime(created)} · </>}Changed {formatRelative(lastChanged(s), now)}
                   </span>
                 </button>
               </li>

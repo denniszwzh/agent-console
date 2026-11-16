@@ -36,17 +36,17 @@ export function RespondingBanner({ activity, unitOpen }: Props) {
     <div className="banner banner-responding" role="status" aria-live="polite">
       <span className="responding-dot" aria-hidden="true" />
       <div className="responding-text">
-        <strong>主對話正在回應</strong>
+        <strong>Main session is responding</strong>
         {/* Hidden from screen readers: inside the live region it would be announced every second. */}
         <span className="responding-elapsed" aria-hidden="true">
-          已 {formatElapsed(activity.since, now)}
+          for {formatElapsed(activity.since, now)}
         </span>
-        {activity.prompt && <span className="responding-prompt">「{activity.prompt}」</span>}
+        {activity.prompt && <span className="responding-prompt">“{activity.prompt}”</span>}
         <div className="hint">
           {quietMs > QUIET_MS
-            ? `已經 ${Math.floor(quietMs / 60000)} 分鐘沒有新動靜，可能在等你確認權限，或已被中斷。`
-            : '完成後新的回覆會自動出現在這裡。'}
-          {unitOpen && ' 要把這則回覆的問答帶進主對話，請在新回覆出現前按「整合結論」。'}
+            ? `No activity for ${Math.floor(quietMs / 60000)} min. It may be waiting for a permission prompt, or it was interrupted.`
+            : 'The new reply will appear here when it is done.'}
+          {unitOpen && ' To pass what you found in this reply to the main session, press Integrate conclusions before the new reply arrives.'}
         </div>
       </div>
     </div>

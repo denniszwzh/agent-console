@@ -25,22 +25,22 @@ export function SourceView({ source }: { source: Source }) {
       )}
       {source.detectedBy === 'git' && (
         <div className="note">
-          agent 的編輯紀錄裡沒有這個檔案，是比對這一輪的 git 狀態找到的：可能是 agent 用 shell 指令寫的，也可能是你或其他程式在這段期間改的。
+          This file is not in the agent's edit records; it was found by comparing this turn's git status. The agent may have written it with a shell command, or you or another program changed it during the turn.
         </div>
       )}
       {source.detectedBy === 'mtime' && (
         <div className="note">
-          可能由這一輪產生：這個檔案在這一輪期間被修改過，但資料夾沒有 git，只能依修改時間判斷，也可能是你或其他程式改的。
+          Possibly from this turn: the file was modified during the turn, but the folder has no git, so only its modification time could be checked. You or another program may have changed it.
         </div>
       )}
-      {source.error && <div className="note error">無法讀取檔案：{source.error}</div>}
-      {source.truncated && <div className="note">檔案超過 1 MB，只顯示前 1 MB 的內容。</div>}
+      {source.error && <div className="note error">Could not read the file: {source.error}</div>}
+      {source.truncated && <div className="note">The file is larger than 1 MB; only the first 1 MB is shown.</div>}
       {source.image && source.path && !source.error ? (
         <figure className="image-source">
           <img src={imageUrl(source.id, source.path)} alt={source.path} />
         </figure>
       ) : source.binary ? (
-        <div className="note">二進位檔，不顯示內容。</div>
+        <div className="note">Binary file; the content is not shown.</div>
       ) : (
         source.blocks.map((b) => (
           <BlockView
@@ -53,11 +53,11 @@ export function SourceView({ source }: { source: Source }) {
         ))
       )}
       {!source.error && !source.binary && !source.image && source.blocks.length === 0 && (
-        <p className="note">（沒有內容）</p>
+        <p className="note">(empty)</p>
       )}
       {orphans.length > 0 && (
         <div className="orphans">
-          <h3>其他問題串</h3>
+          <h3>Other threads</h3>
           {orphans.map((t) => (
             <ThreadView key={t.id} thread={t} />
           ))}

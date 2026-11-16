@@ -36,22 +36,22 @@ describe('RespondingBanner', () => {
     vi.useFakeTimers({ now: T0 + 61_000 });
     render(<RespondingBanner activity={activity()} />);
     const banner = screen.getByRole('status');
-    expect(banner.textContent).toContain('主對話正在回應');
-    expect(banner.textContent).toContain('已 1:01');
-    expect(banner.textContent).toContain('「explain the cache」');
-    expect(banner.textContent).toContain('完成後新的回覆會自動出現在這裡');
+    expect(banner.textContent).toContain('Main session is responding');
+    expect(banner.textContent).toContain('for 1:01');
+    expect(banner.textContent).toContain('“explain the cache”');
+    expect(banner.textContent).toContain('The new reply will appear here when it is done');
     act(() => {
       vi.advanceTimersByTime(2000);
     });
-    expect(banner.textContent).toContain('已 1:03');
+    expect(banner.textContent).toContain('for 1:03');
   });
 
   it('reminds to integrate before the next reply, and says when the session has gone quiet', () => {
     vi.useFakeTimers({ now: T0 + 4 * 60_000 });
     render(<RespondingBanner activity={activity()} unitOpen />);
     const text = screen.getByRole('status').textContent ?? '';
-    expect(text).toContain('已經 4 分鐘沒有新動靜');
-    expect(text).toContain('整合結論');
+    expect(text).toContain('No activity for 4 min');
+    expect(text).toContain('Integrate conclusions');
   });
 });
 
@@ -70,7 +70,7 @@ describe('Sidebar responding badge', () => {
         onSelect={() => {}}
       />,
     );
-    const badges = screen.getAllByTitle('主對話正在回應');
+    const badges = screen.getAllByTitle('Main session is responding');
     expect(badges).toHaveLength(1);
     expect(badges[0].closest('li')?.querySelector('.session-project')?.textContent).toBe('a');
     expect(badges[0].closest('li')?.textContent).not.toContain('codex');

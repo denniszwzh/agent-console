@@ -11,7 +11,7 @@ export interface ProjectGroup {
 /** localStorage key holding the keys of collapsed project groups. */
 export const GROUPS_COLLAPSED_KEY = 'agent-console.groups-collapsed';
 
-const UNKNOWN_FOLDER = '（未知資料夾）';
+const UNKNOWN_FOLDER = '(unknown folder)';
 
 /**
  * Sessions grouped by project (git worktrees under their main repository).

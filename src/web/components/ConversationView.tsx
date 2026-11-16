@@ -256,16 +256,16 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
   };
 
   const byId = useMemo(() => new Map(units.map((u) => [u.id, u])), [units]);
-  const tabs: TabSpec[] = [{ id: STREAM, label: '對話', count: latest ? openCount(latest, latest.reply.id) : 0 }];
+  const tabs: TabSpec[] = [{ id: STREAM, label: 'Conversation', count: latest ? openCount(latest, latest.reply.id) : 0 }];
   for (const f of latest?.files ?? []) {
-    tabs.push({ id: tabId(latest!.id, f.id), label: basename(f.path ?? '檔案'), title: f.path, count: openCount(latest!, f.id), guess: f.detectedBy === 'mtime' });
+    tabs.push({ id: tabId(latest!.id, f.id), label: basename(f.path ?? 'file'), title: f.path, count: openCount(latest!, f.id), guess: f.detectedBy === 'mtime' });
   }
   for (const t of temps) {
     if (t.unitId === latest?.id) continue;
     const f = byId.get(t.unitId)?.files.find((x) => x.id === t.sourceId);
     if (!f) continue;
-    const name = basename(f.path ?? '檔案');
-    tabs.push({ id: t.id, label: `${name}（第 ${t.turnNumber} 輪）`, title: f.path, closable: true, closeLabel: `關閉 ${name}` });
+    const name = basename(f.path ?? 'file');
+    tabs.push({ id: t.id, label: `${name} (turn ${t.turnNumber})`, title: f.path, closable: true, closeLabel: `Close ${name}` });
   }
 
   // The file shown in the file pane, if a file tab is active.
@@ -322,10 +322,10 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
         <div className="stream-content" ref={contentRef}>
           {firstIndex > 0 ? (
             <button type="button" className="btn ghost stream-start" onClick={loadMore}>
-              載入更早的對話
+              Load earlier turns
             </button>
           ) : (
-            units.length > 0 && <div className="stream-start">對話開始於 {new Date(units[0].createdAt).toLocaleString('zh-TW', { hour12: false })}</div>
+            units.length > 0 && <div className="stream-start">Conversation started {new Date(units[0].createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', hour12: false })}</div>
           )}
           {shown.map((u, i) => (
             <TurnView
@@ -340,7 +340,7 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
           {units.length === 0 && responding?.prompt && (
             <div className="turn-prompts">
               <div className="turn-prompt">
-                <span className="turn-prompt-who">你：</span>
+                <span className="turn-prompt-who">You:</span>
                 <div className="turn-prompt-text">{responding.prompt}</div>
               </div>
             </div>
@@ -349,7 +349,7 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
         </div>
         {newTurn && (
           <button type="button" className="btn primary new-turn" onClick={toBottom}>
-            ↓ 新回覆
+            ↓ New reply
           </button>
         )}
       </div>

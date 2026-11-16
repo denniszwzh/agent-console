@@ -99,7 +99,7 @@ describe('Sidebar', () => {
         }}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: '隱藏側欄' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Hide sidebar' }));
     expect(hidden).toBe(true);
   });
 
