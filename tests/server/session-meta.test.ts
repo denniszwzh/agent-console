@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs, { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { codexInstruction } from '../../src/agents/codex.js';
 import { SessionMetaService } from '../../src/server/session-meta.js';
 
 const line = (obj: unknown) => `${JSON.stringify(obj)}\n`;
@@ -182,5 +183,26 @@ describe('SessionMetaService (Codex)', () => {
         codexUser('整理 README'),
     );
     expect(svc().describe('codex', CODEX_ID)).toMatchObject({ title: '整理 README', titleSource: 'prompt' });
+  });
+
+  it('skips the Codex delivery instruction for the title', () => {
+    writeFileSync(codexFile(), codexMeta + codexUser(codexInstruction('C:\\a\\b.md')) + codexUser('整理 README'));
+    expect(svc().describe('codex', CODEX_ID)).toMatchObject({ title: '整理 README', titleSource: 'prompt' });
+  });
+});
+
+describe('SessionMetaService prompt rules (Claude)', () => {
+  it('skips a compaction summary for the title', () => {
+    writeFileSync(
+      claudeFile('s1'),
+      line({ type: 'user', isCompactSummary: true, message: { content: 'This session is being continued from a previous conversation' } }) +
+        line({ type: 'user', message: { content: '真正的提問' } }),
+    );
+    expect(svc().describe('claude', 's1')).toMatchObject({ title: '真正的提問', titleSource: 'prompt' });
+  });
+
+  it('uses pasted content as the title', () => {
+    writeFileSync(claudeFile('s1'), line({ type: 'user', message: { content: '<pasted_content id="1">\n貼上的需求\n</pasted_content>' } }));
+    expect(svc().describe('claude', 's1')).toMatchObject({ title: '貼上的需求', titleSource: 'prompt' });
   });
 });

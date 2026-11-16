@@ -222,6 +222,13 @@ export function codexInstruction(conclusionsPath: string): string {
   return `Read the review conclusions in ${conclusionsPath} and apply them.`;
 }
 
+const INSTRUCTION = /^Read the review conclusions in .+ and apply them\.$/s;
+
+/** True for the message codexInstruction() produces (Agent Console handing conclusions back). */
+export function isCodexInstruction(text: string): boolean {
+  return INSTRUCTION.test(text.trim());
+}
+
 /** Sends one message to a Codex thread's queue. Resolves true on success; never rejects. */
 export type CodexQueueRunner = (threadId: string, message: string) => Promise<boolean>;
 

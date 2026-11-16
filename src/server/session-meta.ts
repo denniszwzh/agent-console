@@ -3,7 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { isSafeId } from '../shared/ids.js';
 import type { AgentKind } from '../shared/types.js';
+import { isCodexInstruction } from '../agents/codex.js';
 import { acceptableTranscriptPath } from './activity.js';
+import { cleanPromptText, isSkippedClaudeRecord, userTextParts } from './turn-prompts.js';
 
 /** Bytes read from the start of a transcript on first sight (creation time, first prompt). */
 const HEAD_BYTES = 256 * 1024;
@@ -17,8 +19,6 @@ const TAIL_BYTES = 4 * 1024 * 1024;
 const MISS_TTL_MS = 5 * 60_000;
 /** Codex rollout file name: rollout-YYYY-MM-DDTHH-MM-SS-<thread id>.jsonl */
 const ROLLOUT_NAME = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)\.jsonl$/;
-/** Codex adds the repository's AGENTS.md to a session as a user message starting with this. */
-const AGENTS_MD_PREFIX = '# AGENTS.md instructions';
 const PROMPT_MAX = 80;
 /** The Codex session index is small; anything past this is read from its end only. */
 const INDEX_MAX_BYTES = 8 * 1024 * 1024;
@@ -62,25 +62,19 @@ interface FileState {
 
 type Rec = Record<string, unknown>;
 
-/** First line of a user prompt, or undefined for empty text and injected context (`<system-reminder>`, AGENTS.md). */
+/**
+ * First line of a user prompt, or undefined for empty text, injected context (see cleanPromptText) and
+ * Agent Console's own conclusion instruction.
+ */
 export function promptLine(text: unknown): string | undefined {
-  if (typeof text !== 'string') return undefined;
-  const t = text.trim();
-  if (!t || t.startsWith('<') || t.startsWith(AGENTS_MD_PREFIX)) return undefined;
+  const t = cleanPromptText(text);
+  if (!t || isCodexInstruction(t)) return undefined;
   const first = (t.split(/\r?\n/).find((l) => l.trim()) ?? '').trim();
   return first.length > PROMPT_MAX ? `${first.slice(0, PROMPT_MAX)}…` : first;
 }
 
 function nonEmpty(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
-}
-
-/** Text parts of a message content (a string or an array of typed parts); undefined when it holds tool results. */
-function textParts(content: unknown, partType: string): string[] | undefined {
-  if (typeof content === 'string') return [content];
-  if (!Array.isArray(content)) return undefined;
-  if (content.some((c) => (c as Rec)?.type === 'tool_result')) return undefined;
-  return content.filter((c) => (c as Rec)?.type === partType).map((c) => String((c as Rec).text ?? ''));
 }
 
 function firstPrompt(parts: string[] | undefined): string | undefined {
@@ -104,7 +98,7 @@ function applyClaude(s: FileState, rec: Rec): void {
       s.lastPrompt ??= promptLine(rec.lastPrompt);
       break;
     case 'user':
-      if (!s.userText && rec.isMeta !== true) s.userText = firstPrompt(textParts((rec.message as Rec | undefined)?.content, 'text'));
+      if (!s.userText && !isSkippedClaudeRecord(rec)) s.userText = firstPrompt(userTextParts((rec.message as Rec | undefined)?.content, 'text'));
       break;
   }
 }
@@ -114,7 +108,7 @@ function applyCodex(s: FileState, rec: Rec): void {
   if (rec.type === 'session_meta' && typeof payload?.timestamp === 'string') s.createdAt ??= payload.timestamp;
   if (!s.createdAt && typeof rec.timestamp === 'string') s.createdAt = rec.timestamp;
   if (!s.userText && rec.type === 'response_item' && payload?.type === 'message' && payload.role === 'user') {
-    s.userText = firstPrompt(textParts(payload.content, 'input_text'));
+    s.userText = firstPrompt(userTextParts(payload.content, 'input_text'));
   }
 }
 

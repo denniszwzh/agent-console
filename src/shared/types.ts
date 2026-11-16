@@ -64,6 +64,14 @@ export interface Thread {
   error?: string;
 }
 
+/** A prompt the user sent in the main session (read from the agent's transcript). */
+export interface TurnPrompt {
+  text: string;
+  at: string;
+  /** Agent Console's own "apply the review conclusions" instruction, not typed by the user. */
+  delivery?: boolean;
+}
+
 export type UnitStatus = 'open' | 'submitted' | 'stale';
 
 export interface ReviewUnit {
@@ -86,6 +94,13 @@ export interface ReviewUnit {
   scanNotice?: { omitted: number; incomplete: boolean };
   /** The agent's transcript (Claude) or rollout (Codex) as reported by the Stop hook; used to read the session name. */
   transcriptPath?: string;
+  /**
+   * The prompts that led to this reply, oldest first (at most the newest few; see promptsOmitted).
+   * Undefined until read from the transcript; [] when read and none was found.
+   */
+  prompts?: TurnPrompt[];
+  /** Earlier prompts of the same turn left out of `prompts`. */
+  promptsOmitted?: number;
 }
 
 export interface Config {
