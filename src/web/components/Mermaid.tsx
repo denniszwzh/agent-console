@@ -29,14 +29,57 @@ function loadMermaid(): Promise<MermaidApi> {
   return mermaidReady;
 }
 
+/**
+ * Diagram colours taken from the panel's own palette (styles.css :root, light and dark), so a
+ * diagram reads as part of the page: accent-blue boxes on the panel's surface colour.
+ */
+const PANEL_LIGHT = {
+  background: '#fffefb',
+  primaryColor: '#e5eff3',
+  primaryBorderColor: '#2f6f8f',
+  primaryTextColor: '#1f2328',
+  secondaryColor: '#f1f6f8',
+  tertiaryColor: '#f6f7f8',
+  lineColor: '#6b7078',
+  textColor: '#1f2328',
+  clusterBkg: '#f6f7f8',
+  clusterBorder: '#c9c5bb',
+  edgeLabelBackground: '#fffefb',
+  actorBkg: '#e5eff3',
+  actorBorder: '#2f6f8f',
+  signalColor: '#3d434a',
+  noteBkgColor: '#fff3d6',
+  noteBorderColor: '#e0c27a',
+};
+const PANEL_DARK = {
+  darkMode: true,
+  background: '#1f2226',
+  primaryColor: '#1d3542',
+  primaryBorderColor: '#5fa3c4',
+  primaryTextColor: '#e4e4e1',
+  secondaryColor: '#24282d',
+  tertiaryColor: '#24282d',
+  lineColor: '#9298a0',
+  textColor: '#e4e4e1',
+  clusterBkg: '#24282d',
+  clusterBorder: '#3a3f46',
+  edgeLabelBackground: '#1f2226',
+  actorBkg: '#1d3542',
+  actorBorder: '#5fa3c4',
+  signalColor: '#c9cbc8',
+  noteBkgColor: '#3a3220',
+  noteBorderColor: '#8a6d2a',
+};
+
 function configFor(dark: boolean): Parameters<MermaidApi['initialize']>[0] {
   return {
     startOnLoad: false,
     securityLevel: 'strict',
     suppressErrorRendering: true,
-    // The 'neo' look and themes: flatter shapes and calmer colours than the classic defaults.
+    // The 'neo' look (rounded shapes, soft shadows) on the 'base' theme coloured with the panel palette.
     look: 'neo',
-    theme: dark ? 'neo-dark' : 'neo',
+    theme: 'base',
+    themeVariables: dark ? PANEL_DARK : PANEL_LIGHT,
     fontFamily: 'system-ui, "Segoe UI", "Microsoft JhengHei", sans-serif',
   };
 }

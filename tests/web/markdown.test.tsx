@@ -24,7 +24,7 @@ describe('Markdown', () => {
     render(<Markdown content={'```mermaid\ngraph TD; A-->B\n```'} />);
     await waitFor(() => expect(mermaidMock.render).toHaveBeenCalled());
     expect(mermaidMock.render.mock.calls[0][1]).toBe('graph TD; A-->B');
-    expect(mermaidMock.initialize).toHaveBeenCalledWith(expect.objectContaining({ securityLevel: 'strict', look: 'neo', theme: 'neo' }));
+    expect(mermaidMock.initialize).toHaveBeenCalledWith(expect.objectContaining({ securityLevel: 'strict', look: 'neo', theme: 'base', themeVariables: expect.objectContaining({ primaryBorderColor: '#2f6f8f' }) }));
     const img = await screen.findByRole('img', { name: 'Mermaid 圖表' });
     expect(img.getAttribute('src')).toMatch(/^data:image\/svg\+xml;base64,/);
   });
@@ -43,7 +43,7 @@ describe('Markdown', () => {
     expect(img.style.width).toBe('120px');
   });
 
-  it('uses the dark neo theme in dark mode and re-renders when the OS scheme changes', async () => {
+  it('uses the dark panel colours in dark mode and re-renders when the OS scheme changes', async () => {
     let dark = true;
     const listeners = new Set<() => void>();
     vi.stubGlobal('matchMedia', (q: string) => ({
@@ -56,10 +56,10 @@ describe('Markdown', () => {
     try {
       mermaidMock.initialize.mockClear();
       render(<Markdown content={'```mermaid\ngraph TD; X-->Y\n```'} />);
-      await waitFor(() => expect(mermaidMock.initialize).toHaveBeenLastCalledWith(expect.objectContaining({ theme: 'neo-dark' })));
+      await waitFor(() => expect(mermaidMock.initialize).toHaveBeenLastCalledWith(expect.objectContaining({ themeVariables: expect.objectContaining({ darkMode: true, background: '#1f2226' }) })));
       dark = false;
       act(() => listeners.forEach((l) => l()));
-      await waitFor(() => expect(mermaidMock.initialize).toHaveBeenLastCalledWith(expect.objectContaining({ theme: 'neo' })));
+      await waitFor(() => expect(mermaidMock.initialize).toHaveBeenLastCalledWith(expect.objectContaining({ themeVariables: expect.objectContaining({ background: '#fffefb' }) })));
     } finally {
       vi.unstubAllGlobals();
     }
