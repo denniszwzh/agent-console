@@ -93,6 +93,26 @@ and clears the status on the interrupt record. A turn whose transcript stays unc
 state is in memory only (a restart forgets it). The Codex hooks print nothing, so they add nothing to the model's
 context.
 
+## Files changed outside the edit tools
+
+The agent's own edit records (Claude `Write`/`Edit`, Codex `apply_patch`) miss files written by shell commands. So
+when a turn ends, the server also looks for files modified since the prompt (the time the `UserPromptSubmit` hook
+reported; without it there is no scan):
+
+- In a git work tree: files under the session folder that `git status` lists as changed or untracked
+  (`.gitignore` is honoured) and whose modification time is after the prompt. They are marked as found through git.
+  If git is there but cannot report (not installed, an untrusted `safe.directory`, a 2-second timeout), nothing is
+  scanned, rather than falling back to a walk that would ignore `.gitignore`.
+- Elsewhere: the session folder is walked (at most 20,000 entries or 1 second; `node_modules`, `dist`, `build`,
+  `.venv` and similar folders are skipped, and the home folder or a drive root is never walked). These files are
+  marked 「可能」, because a modification time cannot tell who made the change.
+
+Both ways also pick up files you or another program changed during the turn (a second agent session in the same
+folder included). Symlinks are not followed, secret-looking names (`.env*`, `*.pem`, `*.key`, `*credential*`,
+`auth.json`, `token.json`, SSH keys, `.npmrc`) are left out, and nothing in `~/.claude`, `~/.codex` or the Agent
+Console data folder is scanned. At most 30 files are added per turn, newest first; the panel says how many were left
+out and whether the walk ran out of budget. Deleted files are not listed.
+
 ## How the conclusions get back
 
 **Claude.** After you submit, send any next message in the terminal (for example "apply the review
@@ -139,8 +159,8 @@ remove all data.
 - Only the newest review unit of a session can take new questions; older ones become read-only history and their
   open threads are marked expired.
 - Codex: only `apply_patch` edits are detected as changed files, also when Codex applies the patch from code mode
-  (read from the rollout's `FileChange` items). Files written by shell commands are not detected; add them with
-  「+ 加入檔案」. A Codex turn without a rollout path yields no files; deletions (and, in older rollouts without `FileChange` items, the source of a move) are shown as errors. `codex queue` into a running TUI is best effort.
+  (read from the rollout's `FileChange` items). Files written by shell commands are found only by the end-of-turn
+  scan (see above); add others with 「+ 加入檔案」. A Codex turn without a rollout path yields no files; deletions (and, in older rollouts without `FileChange` items, the source of a move) are shown as errors. `codex queue` into a running TUI is best effort.
 - Codex forks fail with a clear error if `codex mcp list` cannot be read or an MCP server name is not a plain
   `[A-Za-z0-9_-]` key (it could not be disabled).
 - Managed (policy) Claude settings outrank the fork's own settings; a managed `disableAllHooks` would turn the guard off.

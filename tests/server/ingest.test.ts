@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildApp } from '../../src/server/app.js';
 import { UnitStore } from '../../src/server/store.js';
 import { EventBus } from '../../src/server/events.js';
+import { ActivityTracker } from '../../src/server/activity.js';
 import type { ServerEvent, Thread } from '../../src/shared/types.js';
 
 const TOKEN = 'secret-token';
@@ -113,5 +114,153 @@ describe('stop hook ingestion', () => {
     const app = buildApp({ store: new UnitStore(), token: TOKEN, port: PORT });
     const res = await app.inject({ method: 'POST', url: '/api/hooks/claude/stop', headers, payload: { cwd: work } });
     expect(res.statusCode).toBe(400);
+  });
+
+  describe('end-of-turn scan', () => {
+    const promptHook = (app: ReturnType<typeof buildApp>, sessionId = 'sess-1') =>
+      app.inject({ method: 'GET', url: `/api/hooks/claude/prompt?session=${sessionId}&cwd=${encodeURIComponent(work)}`, headers });
+
+    it('adds scanned files after the recorded ones, skipping duplicates and marking how they were found', async () => {
+      const bus = new EventBus();
+      const activity = new ActivityTracker(bus);
+      const calls: [string, number][] = [];
+      writeFileSync(join(work, 'shell.txt'), 'from a shell command');
+      const scanFiles = async (cwd: string, since: number) => {
+        calls.push([cwd, since]);
+        // a.md is already in the transcript's edit records (relative path there, absolute here).
+        return {
+          method: 'git' as const,
+          hits: [join(work, 'shell.txt'), join(work, 'a.md')].map((p) => ({ path: p, mtimeMs: 1 })),
+          incomplete: false,
+        };
+      };
+      const store = new UnitStore();
+      const app = buildApp({ store, token: TOKEN, port: PORT, bus, activity, scanFiles });
+      expect((await promptHook(app)).statusCode).toBe(200);
+      const since = activity.startedAt('sess-1')!;
+      const unit = store.get((await stop(app)).json().unitId)!;
+      expect(calls).toEqual([[work, since]]);
+      expect(unit.files.map((f) => [f.path, f.detectedBy])).toEqual([
+        ['a.md', undefined],
+        ['b.ts', undefined],
+        ['shell.txt', 'git'],
+      ]);
+      expect(unit.files[2].content).toBe('from a shell command');
+      expect(activity.list()).toEqual([]);
+      activity.close();
+    });
+
+    it('does not scan when the turn start is unknown (no prompt hook ran)', async () => {
+      let called = false;
+      const store = new UnitStore();
+      const app = buildApp({
+        store,
+        token: TOKEN,
+        port: PORT,
+        scanFiles: async () => {
+          called = true;
+          return null;
+        },
+      });
+      const unit = store.get((await stop(app)).json().unitId)!;
+      expect(called).toBe(false);
+      expect(unit.files.map((f) => f.path)).toEqual(['a.md', 'b.ts']);
+    });
+
+    it('uses the real modification-time scan in a folder without git', async () => {
+      const bus = new EventBus();
+      const activity = new ActivityTracker(bus);
+      const store = new UnitStore();
+      const app = buildApp({ store, token: TOKEN, port: PORT, bus, activity });
+      // Files from before the prompt are not part of the turn.
+      const before = (Date.now() - 60_000) / 1000;
+      for (const f of ['a.md', 'b.ts', 't.jsonl']) utimesSync(join(work, f), before, before);
+      await promptHook(app);
+      writeFileSync(join(work, 'made-by-shell.md'), '# hi');
+      const unit = store.get((await stop(app)).json().unitId)!;
+      const scanned = unit.files.filter((f) => f.detectedBy);
+      // A git checkout above the temp folder would turn this into a git scan; tmp is not one here.
+      expect(scanned.map((f) => [f.path, f.detectedBy])).toEqual([['made-by-shell.md', 'mtime']]);
+      activity.close();
+    });
+
+    it('caps scanned files after dropping recorded ones, keeping the newest, and says how many were left out', async () => {
+      const bus = new EventBus();
+      const activity = new ActivityTracker(bus);
+      // 35 new files (newest first) plus the two recorded ones, which must not use up the cap.
+      const fresh = Array.from({ length: 35 }, (_, i) => ({ path: join(work, `gen-${String(i).padStart(2, '0')}.txt`), mtimeMs: 1000 - i }));
+      for (const h of fresh) writeFileSync(h.path, 'x');
+      const hits = [{ path: join(work, 'a.md'), mtimeMs: 2000 }, { path: join(work, 'b.ts'), mtimeMs: 2000 }, ...fresh];
+      const store = new UnitStore();
+      const app = buildApp({ store, token: TOKEN, port: PORT, bus, activity, scanFiles: async () => ({ method: 'mtime', hits, incomplete: true }) });
+      await promptHook(app);
+      const unit = store.get((await stop(app)).json().unitId)!;
+      const scanned = unit.files.filter((f) => f.detectedBy).map((f) => f.path);
+      expect(scanned).toEqual(fresh.slice(0, 30).map((h) => h.path.slice(work.length + 1)));
+      expect(unit.scanNotice).toEqual({ omitted: 5, incomplete: true });
+      activity.close();
+    });
+
+    it('leaves a turn started while the scan ran alone, and keeps Stops of one session in arrival order', async () => {
+      const bus = new EventBus();
+      const activity = new ActivityTracker(bus);
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      let calls = 0;
+      const scanFiles = async () => {
+        if (++calls === 1) await gate;
+        return null;
+      };
+      const store = new UnitStore();
+      const app = buildApp({ store, token: TOKEN, port: PORT, bus, activity, scanFiles });
+      await promptHook(app);
+      const slow = stop(app, 'sess-1', 'first reply');
+      await new Promise((r) => setTimeout(r, 20));
+      // The hook gave up waiting; the user sent the next prompt and that turn ended quickly.
+      await new Promise((r) => setTimeout(r, 5));
+      await promptHook(app);
+      const nextSince = activity.startedAt('sess-1');
+      const fast = stop(app, 'sess-1', 'second reply');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(store.listBySession('sess-1')).toEqual([]);
+      release();
+      const [a, b] = await Promise.all([slow, fast]);
+      const first = store.get(a.json().unitId)!;
+      const second = store.get(b.json().unitId)!;
+      expect(first.reply.content).toBe('first reply');
+      expect(first.status).toBe('stale');
+      expect(second.status).toBe('open');
+      expect(nextSince).toBeDefined();
+      // The second Stop ended the second turn; the first Stop did not end it early.
+      expect(activity.list()).toEqual([]);
+      activity.close();
+    });
+
+    it('the first Stop does not end a turn that started while its scan ran', async () => {
+      const bus = new EventBus();
+      const activity = new ActivityTracker(bus);
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const store = new UnitStore();
+      const app = buildApp({
+        store,
+        token: TOKEN,
+        port: PORT,
+        bus,
+        activity,
+        scanFiles: async () => {
+          await gate;
+          return null;
+        },
+      });
+      await promptHook(app);
+      const slow = stop(app);
+      await new Promise((r) => setTimeout(r, 20));
+      await promptHook(app);
+      release();
+      await slow;
+      expect(activity.list().map((a) => a.sessionId)).toEqual(['sess-1']);
+      activity.close();
+    });
   });
 });

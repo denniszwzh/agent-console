@@ -22,6 +22,12 @@ export interface Source {
   image?: boolean;
   truncated?: boolean;
   error?: string;
+  /**
+   * Set when the file is not in the agent's own edit records but was found by the end-of-turn scan
+   * ('git': changed in `git status` since the turn started; 'mtime': modified since the turn started
+   * in a folder without git, so it may not be the agent's change).
+   */
+  detectedBy?: 'git' | 'mtime';
 }
 
 // sourceId is 'msg:<messageId>' for anchors on an answer.
@@ -76,6 +82,8 @@ export interface ReviewUnit {
   /** Codex only: how a submitted unit was handed back (set at submit). */
   delivery?: { queued: boolean; instruction: string };
   warnings: { at: string; threadId: string; paths: string[] }[];
+  /** Set when the end-of-turn scan left files out (over the per-turn cap) or did not finish its walk. */
+  scanNotice?: { omitted: number; incomplete: boolean };
 }
 
 export interface Config {

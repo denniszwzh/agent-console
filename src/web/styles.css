@@ -388,6 +388,12 @@ textarea {
   color: var(--warn);
   font-weight: 600;
 }
+.banner-scan {
+  background: var(--accent-faint);
+}
+.banner-scan p {
+  margin: 0 0 0.25rem;
+}
 .banner-danger {
   background: var(--danger-soft);
   color: var(--danger);
@@ -449,6 +455,14 @@ textarea {
   color: var(--warn);
   font-size: 0.72rem;
   font-weight: 600;
+}
+.tab-guess {
+  margin-left: 0.15rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  border: 1px dashed var(--border-strong);
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 .add-file-btn {
   margin-bottom: 0.3rem;

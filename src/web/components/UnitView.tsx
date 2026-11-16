@@ -26,6 +26,15 @@ function Banners() {
           <p className="hint">這也可能是你自己在編輯器中修改了檔案。</p>
         </div>
       )}
+      {unit.scanNotice && (
+        <div className="banner banner-scan">
+          {unit.scanNotice.omitted > 0 && (
+            <p>這一輪還有 {unit.scanNotice.omitted} 個變動的檔案沒有加入（每輪最多自動加入 30 個，先加入最新的）。</p>
+          )}
+          {unit.scanNotice.incomplete && <p>資料夾太大，檔案掃描沒有做完，可能漏掉一些檔案。</p>}
+          <p className="hint">需要的檔案可以用「＋ 加入檔案」加入。</p>
+        </div>
+      )}
     </>
   );
 }

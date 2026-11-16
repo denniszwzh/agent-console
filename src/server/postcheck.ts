@@ -12,8 +12,11 @@ export interface GitStatus {
 export type GitStatusProbe = (cwd: string) => Promise<GitStatus | null>;
 export type StatFn = (absPath: string) => { mtimeMs: number; size: number } | null;
 
-/** Our own git calls must never take index.lock: the user's terminal may be running git at the same time. */
-function git(args: string[], cwd: string): Promise<string | null> {
+/**
+ * Runs git and resolves to its stdout, or null on any failure (including `timeoutMs`, when set).
+ * Our own git calls must never take index.lock: the user's terminal may be running git at the same time.
+ */
+export function runGit(args: string[], cwd: string, timeoutMs = 0): Promise<string | null> {
   return new Promise((resolve) => {
     execFile(
       'git',
@@ -24,6 +27,7 @@ function git(args: string[], cwd: string): Promise<string | null> {
         windowsHide: true,
         maxBuffer: 16 * 1024 * 1024,
         encoding: 'utf8',
+        timeout: timeoutMs,
       },
       (err, stdout) => resolve(err ? null : stdout),
     );
@@ -32,9 +36,9 @@ function git(args: string[], cwd: string): Promise<string | null> {
 
 /** Returns null when cwd is not inside a git work tree (the post-check is then skipped). */
 export async function defaultGitStatus(cwd: string): Promise<GitStatus | null> {
-  const root = await git(['rev-parse', '--show-toplevel'], cwd);
+  const root = await runGit(['rev-parse', '--show-toplevel'], cwd);
   if (root === null || !root.trim()) return null;
-  const status = await git(['status', '--porcelain', '-z', '--untracked-files=all'], cwd);
+  const status = await runGit(['status', '--porcelain', '-z', '--untracked-files=all'], cwd);
   return status === null ? null : { root: root.trim(), status };
 }
 

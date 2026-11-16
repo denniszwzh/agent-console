@@ -6,7 +6,7 @@ import { codexInstruction, type CodexQueueRunner } from '../../agents/codex.js';
 import { buildConclusionBundle } from '../conclusion.js';
 import type { EventBus } from '../events.js';
 import { resolveUnitImage } from '../images.js';
-import { conclusionFile } from '../paths.js';
+import { conclusionFile, pathKey } from '../paths.js';
 import { takeSnapshot } from '../snapshot.js';
 import type { UnitStore } from '../store.js';
 import { ConflictError, NotFoundError, ValidationError, type ThreadEngine } from '../threads.js';
@@ -32,11 +32,6 @@ function isFile(p: string): boolean {
   }
 }
 
-/** Comparison key for an absolute path (Windows paths are case-insensitive). */
-function pathKey(p: string): string {
-  const n = path.normalize(p);
-  return process.platform === 'win32' ? n.toLowerCase() : n;
-}
 
 export function registerUnitRoutes(
   app: FastifyInstance,

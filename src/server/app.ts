@@ -9,7 +9,7 @@ import type { UnitStore } from './store.js';
 import { EventBus } from './events.js';
 import { ActivityTracker } from './activity.js';
 import { createCodexQueueRunner, type CodexQueueRunner } from '../agents/codex.js';
-import { registerHookRoutes } from './routes/hooks.js';
+import { registerHookRoutes, type TurnScanner } from './routes/hooks.js';
 import { registerUnitRoutes } from './routes/units.js';
 import type { ThreadEngine } from './threads.js';
 import { readConfig } from './paths.js';
@@ -30,6 +30,8 @@ export interface AppDeps {
   bus?: EventBus;
   /** "Main session is working on a turn" state; defaults to a fresh tracker on the bus. */
   activity?: ActivityTracker;
+  /** End-of-turn file scan used by Stop ingestion; defaults to the real git / modification-time scan. */
+  scanFiles?: TurnScanner;
   engine?: ThreadEngine;
   config?: Config;
   /** Sends a message to a Codex thread queue on submit; defaults to the real `codex queue`. */
@@ -163,7 +165,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
     });
 
-    registerHookRoutes(api, { store, bus, config: deps.config ?? readConfig(), forks: deps.forks ?? deps.engine, activity });
+    registerHookRoutes(api, { store, bus, config: deps.config ?? readConfig(), forks: deps.forks ?? deps.engine, activity, scanFiles: deps.scanFiles });
     if (deps.engine) registerUnitRoutes(api, { engine: deps.engine, store, bus, codexQueue: deps.codexQueue ?? createCodexQueueRunner() });
   });
 

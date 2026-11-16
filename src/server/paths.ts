@@ -13,6 +13,12 @@ export function dataDir(): string {
   return dir;
 }
 
+/** Comparison key for an absolute path (Windows paths are case-insensitive). */
+export function pathKey(p: string): string {
+  const n = path.normalize(p);
+  return process.platform === 'win32' ? n.toLowerCase() : n;
+}
+
 function isCode(e: unknown, code: string): boolean {
   return (e as NodeJS.ErrnoException)?.code === code;
 }

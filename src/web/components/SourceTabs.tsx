@@ -55,6 +55,12 @@ export function SourceTabs({ activeId, onSelect, onAddingFile, leading }: Props)
               onClick={() => onSelect(s.id)}
             >
               <span className="tab-label">{s.kind === 'reply' ? '回覆' : basename(s.path ?? '檔案')}</span>
+              {s.detectedBy === 'mtime' && (
+                <span className="tab-guess" title="依修改時間找到，不一定是 agent 改的">
+                  {' '}
+                  可能
+                </span>
+              )}
               {n > 0 && (
                 <span className="tab-count" title={`${n} 個未結束問題串`}>
                   {' '}

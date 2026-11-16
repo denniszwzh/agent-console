@@ -99,6 +99,12 @@ export class ActivityTracker {
     return [...this.entries.values()].map((e) => ({ ...e.activity, lastChange: new Date(e.lastChangeMs).toISOString() }));
   }
 
+  /** Start time (epoch ms) of a session's current turn, if one is active. */
+  startedAt(sessionId: string): number | undefined {
+    const e = this.entries.get(sessionId);
+    return e ? Date.parse(e.activity.since) : undefined;
+  }
+
   start(input: StartInput): void {
     const nowMs = this.now();
     const transcriptPath = acceptableTranscriptPath(input.transcriptPath);

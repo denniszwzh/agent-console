@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { closeSync, openSync, readSync } from 'node:fs';
 import { extname, resolve } from 'node:path';
 import type { Source } from '../shared/types.js';
 import { splitBlocks } from '../shared/blocks.js';
@@ -22,7 +22,20 @@ export function takeSnapshot(filePath: string, cwd: string): Source {
 
   let buf: Buffer;
   try {
-    buf = readFileSync(resolve(cwd, filePath));
+    // Read at most one byte past the limit: a huge file must not be loaded whole.
+    const fd = openSync(resolve(cwd, filePath), 'r');
+    try {
+      const chunk = Buffer.alloc(MAX_SNAPSHOT_BYTES + 1);
+      let n = 0;
+      while (n < chunk.length) {
+        const r = readSync(fd, chunk, n, chunk.length - n, n);
+        if (r === 0) break;
+        n += r;
+      }
+      buf = chunk.subarray(0, n);
+    } finally {
+      closeSync(fd);
+    }
   } catch (err) {
     source.error = err instanceof Error ? err.message : String(err);
     return source;
