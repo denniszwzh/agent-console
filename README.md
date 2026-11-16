@@ -90,8 +90,12 @@ waiting for a permission prompt or may have been interrupted. The `Stop` hook cl
 arrives. When you interrupt a turn, Codex runs its `Interrupt` hook, which clears the status. Claude Code has no such
 hook and does not run `Stop` on an interrupt, so for Claude the server watches the lines appended to the transcript
 and clears the status on the interrupt record. A turn whose transcript stays unchanged for an hour is dropped. The
-state is in memory only (a restart forgets it). The Codex hooks print nothing, so they add nothing to the model's
-context.
+state is kept in memory. After a restart the server reads the end of each known session's transcript (changed in the
+last hour): a turn started after the session's last reply and not yet ended (Claude: no Stop, end-of-turn or interrupt
+record; Codex: a `task_started` without `task_complete` or `turn_aborted`) is marked responding again, from its
+original start time. A session that has never replied is not known after a restart and shows up again with its next
+prompt. A turn started by another session's message or a background task shows that as its label instead of the raw
+message. The Codex hooks print nothing, so they add nothing to the model's context.
 
 ## Session names and the quick switcher
 
