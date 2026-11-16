@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReviewUnit } from '../shared/types.js';
 import { ApiError, api, subscribeEvents, type SessionActivity, type SessionSummary } from './api.js';
 import { RespondingBanner } from './components/Responding.js';
+import { SessionSwitcher, useHoldSwitcher } from './components/SessionSwitcher.js';
 import { Sidebar } from './components/Sidebar.js';
 import { UnitView } from './components/UnitView.js';
 import { useSidebarLayout } from './layout.js';
@@ -24,6 +25,7 @@ export function App() {
   const [unauthorized, setUnauthorized] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const layout = useSidebarLayout();
+  const switcher = useHoldSwitcher();
   // Request counters so a slow, older response never overwrites a newer one.
   const seq = useRef(new Map<string, number>());
 
@@ -183,6 +185,19 @@ export function App() {
         />
       )}
       {layout.compact && layout.open && <div className="drawer-backdrop" aria-hidden="true" onClick={layout.hide} />}
+      {switcher.open && (
+        <SessionSwitcher
+          sessions={sidebarSessions}
+          unitsBySession={units}
+          activity={activity}
+          selectedSession={sel.session}
+          onSelect={(session, unit) => {
+            setSel({ session, unit });
+            switcher.close();
+            if (layout.compact) layout.hide();
+          }}
+        />
+      )}
       <div className="main">
         {error && (
           <div className="toast" role="alert">
