@@ -124,6 +124,8 @@ export interface SessionSummary {
   createdAt?: string;
   /** Last time the session's transcript changed. */
   lastModified?: string;
+  /** The project the session's folder belongs to (the main repository for a git worktree). */
+  project?: { key: string; root: string; worktree?: string };
 }
 
 /** A main session that is working on a turn right now (GET /api/activity). */

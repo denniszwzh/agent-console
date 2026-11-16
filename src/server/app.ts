@@ -7,6 +7,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import type { UnitStore } from './store.js';
 import { EventBus } from './events.js';
+import { projectOf } from './project.js';
 import { ActivityTracker } from './activity.js';
 import { createCodexQueueRunner, type CodexQueueRunner } from '../agents/codex.js';
 import { registerHookRoutes, type TurnScanner } from './routes/hooks.js';
@@ -95,10 +96,14 @@ function listSessions(store: UnitStore, activity: ActivityTracker, meta: Session
     .list()
     .filter((a) => !known.has(a.sessionId))
     .map((a) => ({ sessionId: a.sessionId, agent: a.agent, cwd: a.cwd, lastActivity: a.since }));
-  return [...fresh, ...replied].map((s) => ({
-    ...s,
-    ...meta.describe(s.agent, s.sessionId, store.transcriptPathFor(s.sessionId) ?? activity.transcriptPathFor(s.sessionId)),
-  }));
+  return [...fresh, ...replied].map((s) => {
+    const project = projectOf(s.cwd);
+    return {
+      ...s,
+      ...meta.describe(s.agent, s.sessionId, store.transcriptPathFor(s.sessionId) ?? activity.transcriptPathFor(s.sessionId)),
+      ...(project ? { project } : {}),
+    };
+  });
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {

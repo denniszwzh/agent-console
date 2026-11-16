@@ -8,6 +8,7 @@ import { buildApp } from '../../src/server/app.js';
 import { EventBus } from '../../src/server/events.js';
 import { UnitStore } from '../../src/server/store.js';
 import { ActivityTracker } from '../../src/server/activity.js';
+import { pathKey } from '../../src/server/paths.js';
 import type { SessionMeta, SessionMetaService } from '../../src/server/session-meta.js';
 
 const TOKEN = 'secret-token';
@@ -224,10 +225,25 @@ describe('GET /api/sessions with transcript meta', () => {
         url: '/api/sessions',
         headers,
       });
-      expect(res.json()).toEqual([{ sessionId: 's9', agent: 'codex', cwd: 'C:/w', lastActivity: activity.list()[0].since }]);
+      // 'C:/w' is absolute on Windows only, so the project is compared separately.
+      expect(res.json()).toMatchObject([{ sessionId: 's9', agent: 'codex', cwd: 'C:/w', lastActivity: activity.list()[0].since }]);
       expect(calls).toEqual([['codex', 's9', undefined]]);
     } finally {
       activity.close();
+    }
+  });
+
+  it('adds the project to each session', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ac-proj-'));
+    try {
+      mkdirSync(join(dir, '.git'));
+      mkdirSync(join(dir, 'src'));
+      const store = new UnitStore();
+      store.save({ ...unit('u1', 's1', '2026-11-16T01:00:00.000Z'), cwd: join(dir, 'src') });
+      const res = await buildApp({ store, token: TOKEN, port: PORT, sessionMeta: fakeMeta({}).svc }).inject({ method: 'GET', url: '/api/sessions', headers });
+      expect(res.json()[0].project).toEqual({ key: pathKey(dir), root: dir });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
