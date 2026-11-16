@@ -7,20 +7,21 @@ import { imageUrl } from './api.js';
  * own failure to the user and then rejects, so callers can keep their input.
  */
 export interface UnitActions {
+  /** Creates a thread and sends it at once. */
   addThread(anchor: Anchor, question: string, parentThreadId?: string): Promise<void>;
   deleteThread(threadId: string): Promise<void>;
-  sendDrafts(): Promise<void>;
+  /** Sends a leftover unsent thread. */
+  sendThread(threadId: string): Promise<void>;
   followUp(threadId: string, text: string): Promise<void>;
   retry(threadId: string): Promise<void>;
-  resolve(threadId: string): Promise<void>;
-  setConclusion(threadId: string, conclusion: string | null): Promise<void>;
-  submit(): Promise<void>;
+  /** Concludes every answered thread and hands the conclusions to the main session. */
+  integrate(): Promise<void>;
   addFile(path: string): Promise<void>;
 }
 
 export interface UnitContextValue {
   unit: ReviewUnit;
-  /** Anything but an open unit is browse-only history. */
+  /** Anything but an open unit is browse-only history; so is a unit whose conclusions are being integrated. */
   readOnly: boolean;
   actions: UnitActions;
   /** Threads anchored on one block of one source (a reply, a file, or 'msg:<id>'). */
@@ -42,7 +43,7 @@ export function UnitProvider({ unit, actions, children }: { unit: ReviewUnit; ac
     }
     return {
       unit,
-      readOnly: unit.status !== 'open',
+      readOnly: unit.status !== 'open' || unit.integrating === true,
       actions,
       threadsAt: (sourceId, blockId) => byAnchor.get(`${sourceId}\n${blockId}`) ?? [],
       imageUrl: (sourceId, p) => imageUrl(unit.id, sourceId, p),
@@ -69,16 +70,6 @@ export function rootSourceId(unit: ReviewUnit, thread: Thread): string {
     cur = parent;
   }
   return cur.anchor.sourceId;
-}
-
-export function isOpenThread(t: Thread): boolean {
-  return t.status !== 'resolved' && t.status !== 'expired';
-}
-
-/** Unfinished threads across a session's units that are still under review. */
-export function openThreadCount(units: ReviewUnit[] | undefined): number {
-  if (!units) return 0;
-  return units.filter((u) => u.status === 'open').reduce((n, u) => n + u.threads.filter(isOpenThread).length, 0);
 }
 
 /** Threads across a session's units whose fork is answering right now. */

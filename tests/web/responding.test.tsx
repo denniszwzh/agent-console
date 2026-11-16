@@ -46,12 +46,12 @@ describe('RespondingBanner', () => {
     expect(banner.textContent).toContain('已 1:03');
   });
 
-  it('warns about open threads, and says when the session has gone quiet', () => {
+  it('reminds to integrate before the next reply, and says when the session has gone quiet', () => {
     vi.useFakeTimers({ now: T0 + 4 * 60_000 });
     render(<RespondingBanner activity={activity()} unitOpen />);
     const text = screen.getByRole('status').textContent ?? '';
     expect(text).toContain('已經 4 分鐘沒有新動靜');
-    expect(text).toContain('還沒結束的問題串');
+    expect(text).toContain('整合結論');
   });
 });
 

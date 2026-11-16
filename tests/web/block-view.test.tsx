@@ -33,7 +33,7 @@ describe('BlockView selection questions', () => {
     expect(document.activeElement).toBe(textarea);
     fireEvent.change(textarea, { target: { value: 'Why first?' } });
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '加入草稿' }));
+      fireEvent.click(screen.getByRole('button', { name: '送出' }));
     });
     const block = unit.reply.blocks[1];
     expect(actions.addThread).toHaveBeenCalledWith(

@@ -7,64 +7,64 @@ import { anchorOn, fakeActions, makeThread, makeUnit, renderInUnit } from './fix
 afterEach(cleanup);
 
 describe('ConclusionBar', () => {
-  it('ConclusionBar disables submit while any thread unresolved', () => {
+  const integrate = () => screen.getByRole('button', { name: /整合/ });
+
+  it('cannot integrate while a thread is answering, and says why', () => {
     const unit = makeUnit();
     const a = anchorOn(unit);
-    unit.threads = [
-      makeThread('t1', a, { status: 'resolved', conclusion: 'Keep it.' }),
-      makeThread('t2', a, { status: 'resolved', conclusion: 'Rename it.' }),
-      // A nested child that is still open must also block submission.
-      makeThread('t3', { ...a, sourceId: 'msg:m1' }, { parentThreadId: 't2', status: 'awaiting' }),
-    ];
+    unit.threads = [makeThread('t1', a), makeThread('t2', { ...a, sourceId: 'msg:m1' }, { parentThreadId: 't1', status: 'answering' })];
     renderInUnit(<ConclusionBar />, unit);
-    expect(screen.getByRole('button', { name: '送出結論' })).toHaveProperty('disabled', true);
+    expect(integrate()).toHaveProperty('disabled', true);
+    expect(screen.getByText('還有 1 串正在回答')).toBeTruthy();
   });
 
-  it('ConclusionBar enables submit when all resolved', () => {
+  it('integrates once every thread has its answer; failed and unsent threads do not block', () => {
     const unit = makeUnit();
     const a = anchorOn(unit);
-    unit.threads = [
-      makeThread('t1', a, { status: 'resolved', conclusion: 'Keep it.' }),
-      makeThread('t2', a, { status: 'resolved', conclusion: null, noConclusion: true }),
-    ];
-    renderInUnit(<ConclusionBar />, unit);
-    expect(screen.getByRole('button', { name: '送出結論' })).toHaveProperty('disabled', false);
+    unit.threads = [makeThread('t1', a), makeThread('t2', a, { status: 'error', error: 'x' }), makeThread('t3', a, { status: 'draft', sessionId: null })];
+    const actions = fakeActions();
+    renderInUnit(<ConclusionBar />, unit, actions);
+    expect(screen.getByText('1 串已回答')).toBeTruthy();
+    fireEvent.click(integrate());
+    expect(actions.integrate).toHaveBeenCalledTimes(1);
   });
 
-  it('counts top-level threads in the preview counter', () => {
+  it('cannot integrate without an answered thread', () => {
     const unit = makeUnit();
-    const a = anchorOn(unit);
-    unit.threads = [
-      makeThread('t1', a, { status: 'resolved', conclusion: 'Keep it.' }),
-      makeThread('t2', a, { status: 'awaiting' }),
-      makeThread('t3', { ...a, sourceId: 'msg:m1' }, { parentThreadId: 't2', status: 'resolved', conclusion: 'x' }),
-    ];
     renderInUnit(<ConclusionBar />, unit);
-    expect(screen.getByRole('button', { name: /結論預覽（1\/2）/ })).toBeTruthy();
+    expect(integrate()).toHaveProperty('disabled', true);
+    expect(screen.getByText('還沒有已回答的問題串')).toBeTruthy();
   });
 
-  it('shows the Claude delivery hint after submit', () => {
+  it('shows the progress and stays disabled while integrating', () => {
+    const unit = makeUnit({ integrating: true });
+    const a = anchorOn(unit);
+    unit.threads = [makeThread('t1', a, { status: 'resolved', conclusion: 'ok' }), makeThread('t2', a, { status: 'answering' })];
+    renderInUnit(<ConclusionBar />, unit);
+    expect(screen.getByRole('status').textContent).toBe('正在整合結論…（1/2）');
+    expect(integrate()).toHaveProperty('disabled', true);
+    expect(integrate().textContent).toBe('整合中…');
+  });
+
+  it('shows why the last integration stopped, and allows another try', () => {
+    const unit = makeUnit({ integrationError: 'conclusion failed' });
+    unit.threads = [makeThread('t1', anchorOn(unit))];
+    renderInUnit(<ConclusionBar />, unit);
+    expect(screen.getByRole('alert').textContent).toContain('conclusion failed');
+    expect(integrate()).toHaveProperty('disabled', false);
+  });
+
+  it('after submitting, lists the conclusions read-only with the delivery hint', () => {
     const unit = makeUnit({ status: 'submitted' });
-    unit.threads = [makeThread('t1', anchorOn(unit), { status: 'resolved', conclusion: 'Keep it.' })];
+    const a = anchorOn(unit);
+    unit.threads = [makeThread('t1', a, { status: 'resolved', conclusion: 'Keep it.' }), makeThread('t2', a, { status: 'error' })];
     renderInUnit(<ConclusionBar />, unit);
     expect(screen.getByText(/結論會自動帶入主對話/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: '送出結論' })).toHaveProperty('disabled', true);
-  });
-
-  it('shows a pending state while the submit request is in flight', async () => {
-    const unit = makeUnit();
-    unit.threads = [makeThread('t1', anchorOn(unit), { status: 'resolved', conclusion: 'Keep it.' })];
-    let finish!: () => void;
-    const actions = fakeActions();
-    actions.submit = vi.fn(() => new Promise<void>((r) => (finish = r)));
-    renderInUnit(<ConclusionBar />, unit, actions);
-    fireEvent.click(screen.getByRole('button', { name: '送出結論' }));
-    const pending = await screen.findByRole('button', { name: '送出中…' });
-    expect(pending).toHaveProperty('disabled', true);
-    expect(screen.getByRole('status').textContent).toBe('正在送出結論…');
-    finish();
-    await screen.findByRole('button', { name: '送出結論' });
-    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('button', { name: /整合/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /查看結論/ }));
+    expect(screen.getByText('Keep it.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '編輯' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '標記為無結論' })).toBeNull();
   });
 
   it('offers the Claude bundle path with a copy button as a fallback', async () => {

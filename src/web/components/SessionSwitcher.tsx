@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReviewUnit, SessionActivity, SessionSummary } from '../../shared/types.js';
 import { UNIT_STATUS_LABELS, formatRelative, formatTime, lastChanged, sessionTitle } from '../labels.js';
-import { answeringThreadCount, openThreadCount } from '../unit-context.js';
+import { answeringThreadCount } from '../unit-context.js';
 import { formatElapsed, useNow } from './Responding.js';
 
 /**
@@ -90,7 +90,6 @@ export function SessionSwitcher({ sessions, unitsBySession, activity, selectedSe
             const created = s.createdAt ?? units?.[0]?.createdAt;
             const act = responding.get(s.sessionId);
             const answering = answeringThreadCount(units);
-            const open = openThreadCount(units);
             const current = s.sessionId === selectedSession;
             return (
               <li key={s.sessionId}>
@@ -111,7 +110,6 @@ export function SessionSwitcher({ sessions, unitsBySession, activity, selectedSe
                         </span>
                       )}
                       {answering > 0 && <span className="switcher-answering">{answering} 個問題串回答中</span>}
-                      {open > 0 && <span className="open-count">{open} 未結</span>}
                       {latest && <span className={`switcher-status status-${latest.status}`}>{UNIT_STATUS_LABELS[latest.status]}</span>}
                     </span>
                   </span>

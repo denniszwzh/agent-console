@@ -157,12 +157,10 @@ export function App() {
       const actions: UnitActions = {
         addThread: (anchor, question, parentThreadId) => run(() => api.addThread(unitId, anchor, question, parentThreadId)),
         deleteThread: (id) => run(() => api.deleteThread(id)),
-        sendDrafts: () => run(() => api.sendDrafts(unitId)),
+        sendThread: (id) => run(() => api.sendThread(id)),
         followUp: (id, text) => run(() => api.followUp(id, text)),
         retry: (id) => run(() => api.retry(id)),
-        resolve: (id) => run(() => api.resolve(id)),
-        setConclusion: (id, conclusion) => run(() => api.setConclusion(id, conclusion)),
-        submit: () => run(() => api.submit(unitId)),
+        integrate: () => run(() => api.integrate(unitId)),
         addFile: (path) => run(() => api.addFile(unitId, path)),
       };
       actionsCache.current.set(unitId, actions);

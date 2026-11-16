@@ -1626,3 +1626,19 @@ textarea {
   margin-left: 0.5rem;
   margin-right: 0.5rem;
 }
+
+/* Conclusion bar: integration status, why it cannot start, and why the last one stopped. */
+.bar-status {
+  font-size: 0.85rem;
+}
+.bar-reason {
+  font-size: 0.8rem;
+  margin-right: 0.6rem;
+}
+.conclusion-bar .delivery.error {
+  margin-top: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}

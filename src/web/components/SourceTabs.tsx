@@ -41,7 +41,7 @@ export function SourceTabs({ tabs, activeId, onSelect, onClose, leading, trailin
                 </span>
               )}
               {t.count !== undefined && t.count > 0 && (
-                <span className="tab-count" title={`${t.count} 個未結束問題串`}>
+                <span className="tab-count" title={`${t.count} 串正在回答`}>
                   {' '}
                   {t.count}
                 </span>

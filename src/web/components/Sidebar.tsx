@@ -3,7 +3,7 @@ import type { ReviewUnit } from '../../shared/types.js';
 import type { SessionSummary } from '../api.js';
 import { groupSessions, readCollapsedGroups, writeCollapsedGroups } from '../grouping.js';
 import { formatTime, sessionTitle } from '../labels.js';
-import { openThreadCount } from '../unit-context.js';
+import { answeringThreadCount } from '../unit-context.js';
 
 interface Props {
   sessions: SessionSummary[];
@@ -52,7 +52,7 @@ export function Sidebar({ sessions, responding, unitsBySession, selectedSession,
       <ul className="project-list">
         {groups.map((g) => {
           const isOpen = !collapsed.has(g.key);
-          const open = g.sessions.reduce((n, s) => n + openThreadCount(unitsBySession[s.sessionId]), 0);
+          const open = g.sessions.reduce((n, s) => n + answeringThreadCount(unitsBySession[s.sessionId]), 0);
           return (
             <li key={g.key} className="project-group">
               <button type="button" className="project-head" aria-expanded={isOpen} title={g.root} onClick={() => toggle(g.key)}>
@@ -60,12 +60,12 @@ export function Sidebar({ sessions, responding, unitsBySession, selectedSession,
                   {isOpen ? '▾' : '▸'}
                 </span>
                 <span className="project-name">{g.name}</span>
-                {open > 0 && <span className="open-count">{open} 未結</span>}
+                {open > 0 && <span className="open-count">{open} 串回答中</span>}
               </button>
               {isOpen && (
                 <ul className="session-list">
                   {g.sessions.map((s) => {
-                    const sessionOpen = openThreadCount(unitsBySession[s.sessionId]);
+                    const sessionOpen = answeringThreadCount(unitsBySession[s.sessionId]);
                     const selected = s.sessionId === selectedSession;
                     const worktree = s.project?.worktree;
                     return (
@@ -92,8 +92,8 @@ export function Sidebar({ sessions, responding, unitsBySession, selectedSession,
                             </span>
                           )}
                           {sessionOpen > 0 && (
-                            <span className="open-count" title={`${sessionOpen} 個未結束問題串`}>
-                              {sessionOpen} 未結
+                            <span className="open-count" title={`${sessionOpen} 個問題串正在回答`}>
+                              {sessionOpen} 串回答中
                             </span>
                           )}
                         </button>

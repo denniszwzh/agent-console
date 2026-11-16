@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { ReviewUnit, SessionActivity, SessionSummary } from '../../shared/types.js';
 import { basename } from '../labels.js';
 import { anchorTop, nearBottom, topAnchor, type StreamAnchor } from '../scroll.js';
-import { UnitProvider, isOpenThread, rootSourceId, type UnitActions } from '../unit-context.js';
+import { UnitProvider, rootSourceId, type UnitActions } from '../unit-context.js';
 import { ConclusionBar } from './ConclusionBar.js';
 import { RespondingBanner } from './Responding.js';
 import { AddFileButton, SourceTabs, type TabSpec } from './SourceTabs.js';
@@ -40,8 +40,9 @@ interface Props {
 
 const tabId = (unitId: string, sourceId: string) => `${unitId}:${sourceId}`;
 
+/** Threads under one tab whose fork is answering right now. */
 function openCount(unit: ReviewUnit, sourceId: string): number {
-  return unit.threads.filter((t) => isOpenThread(t) && rootSourceId(unit, t) === sourceId).length;
+  return unit.threads.filter((t) => t.status === 'answering' && rootSourceId(unit, t) === sourceId).length;
 }
 
 /**

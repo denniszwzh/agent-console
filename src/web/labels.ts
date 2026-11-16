@@ -3,8 +3,8 @@ import type { SessionSummary, ThreadStatus, UnitStatus } from '../shared/types.j
 export const THREAD_STATUS_LABELS: Record<ThreadStatus, string> = {
   draft: '草稿',
   answering: '回答中',
-  awaiting: '等待追問',
-  resolved: '已結束',
+  awaiting: '已回答',
+  resolved: '有結論',
   error: '錯誤',
   expired: '已過期',
 };

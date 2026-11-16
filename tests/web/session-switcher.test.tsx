@@ -134,7 +134,7 @@ describe('SessionSwitcher', () => {
     const [r1, r2] = rows();
     expect(r1.textContent).toContain('回應中');
     expect(r1.textContent).toContain('1:23');
-    expect(r1.textContent).toContain('2 未結');
+    expect(r1.textContent).not.toContain('未結');
     expect(r1.textContent).toContain('審查中');
     expect(r2.textContent).toContain('問題串回答中');
     expect(r2.textContent).toContain('已送出');

@@ -17,11 +17,11 @@ export function StatusPill({ status }: { status: Thread['status'] }) {
 }
 
 export function ThreadView({ thread, blockText }: Props) {
-  const { unit, readOnly, actions, imageUrl } = useUnit();
-  const [open, setOpen] = useState(thread.status !== 'resolved' && thread.status !== 'expired');
+  const { readOnly, actions, imageUrl } = useUnit();
+  // History (earlier turns, submitted conclusions) starts folded; the turn under review starts open.
+  const [open, setOpen] = useState(!readOnly && thread.status !== 'resolved' && thread.status !== 'expired');
   const [composing, setComposing] = useState(false);
   const question = thread.messages.find((m) => m.role === 'user')?.content ?? '';
-  const openChildren = unit.threads.some((t) => t.parentThreadId === thread.id && t.status !== 'resolved');
   const { status } = thread;
 
   return (
@@ -63,9 +63,14 @@ export function ThreadView({ thread, blockText }: Props) {
           {!readOnly && (
             <div className="thread-actions">
               {status === 'draft' && (
-                <button type="button" className="btn ghost" onClick={() => fire(actions.deleteThread(thread.id))}>
-                  刪除草稿
-                </button>
+                <>
+                  <button type="button" className="btn primary" onClick={() => fire(actions.sendThread(thread.id))}>
+                    送出
+                  </button>
+                  <button type="button" className="btn ghost" onClick={() => fire(actions.deleteThread(thread.id))}>
+                    刪除
+                  </button>
+                </>
               )}
               {status === 'error' && (
                 <button type="button" className="btn" onClick={() => fire(actions.retry(thread.id))}>
@@ -77,23 +82,12 @@ export function ThreadView({ thread, blockText }: Props) {
                   追問
                 </button>
               )}
-              {status === 'awaiting' && (
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={openChildren}
-                  title={openChildren ? '子問題串都結束後才能結束此串' : '請 agent 整理一行結論'}
-                  onClick={() => fire(actions.resolve(thread.id))}
-                >
-                  結束此串
-                </button>
-              )}
             </div>
           )}
           {!readOnly && composing && (
             <Composer
               placeholder="在這個問題串裡追問…"
-              submitLabel="送出追問"
+              submitLabel="送出"
               onSubmit={async (text) => {
                 await actions.followUp(thread.id, text);
                 setComposing(false);

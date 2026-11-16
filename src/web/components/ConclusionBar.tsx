@@ -1,77 +1,21 @@
 import { useState } from 'react';
-import { canSubmit } from '../../shared/gate.js';
+import { integrationState } from '../../shared/gate.js';
 import type { ReviewUnit, Thread } from '../../shared/types.js';
 import { firstLine } from '../labels.js';
 import { fire, useUnit } from '../unit-context.js';
-import { StatusPill } from './ThreadView.js';
 
+/** One concluded thread in the read-only list shown after the conclusions were handed back. */
 function ConclusionItem({ thread }: { thread: Thread }) {
-  const { readOnly, actions } = useUnit();
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
   const question = thread.messages.find((m) => m.role === 'user')?.content ?? '';
-  const resolved = thread.status === 'resolved';
   const text = thread.noConclusion || thread.conclusion === null ? null : thread.conclusion;
-
-  const save = async () => {
-    try {
-      await actions.setConclusion(thread.id, draft.trim() ? draft.trim() : null);
-      setEditing(false);
-    } catch {
-      // Already reported; stay in edit mode.
-    }
-  };
-
   return (
     <li className="conclusion-item">
       <div className="conclusion-question">
-        {!resolved && <StatusPill status={thread.status} />}
         <span>{firstLine(question, 90)}</span>
       </div>
-      {resolved &&
-        (editing ? (
-          <div className="conclusion-edit">
-            <input
-              autoFocus
-              value={draft}
-              placeholder="一行結論；留空代表無結論"
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void save();
-                if (e.key === 'Escape') setEditing(false);
-              }}
-            />
-            <button type="button" className="btn primary" onClick={() => void save()}>
-              儲存
-            </button>
-            <button type="button" className="btn ghost" onClick={() => setEditing(false)}>
-              取消
-            </button>
-          </div>
-        ) : (
-          <div className="conclusion-text">
-            <span className={text === null ? 'muted' : undefined}>{text ?? '（無結論）'}</span>
-            {!readOnly && (
-              <span className="conclusion-tools">
-                <button
-                  type="button"
-                  className="btn ghost small"
-                  onClick={() => {
-                    setDraft(text ?? '');
-                    setEditing(true);
-                  }}
-                >
-                  編輯
-                </button>
-                {text !== null && (
-                  <button type="button" className="btn ghost small" onClick={() => fire(actions.setConclusion(thread.id, null))}>
-                    標記為無結論
-                  </button>
-                )}
-              </span>
-            )}
-          </div>
-        ))}
+      <div className="conclusion-text">
+        <span className={text === null ? 'muted' : undefined}>{text ?? '（無結論）'}</span>
+      </div>
     </li>
   );
 }
@@ -134,63 +78,66 @@ function CodexDelivery({ unit }: { unit: ReviewUnit }) {
   );
 }
 
+/** The single action of a turn under review: conclude every answered thread and hand them back. */
 export function ConclusionBar() {
-  const { unit, readOnly, actions } = useUnit();
+  const { unit, actions } = useUnit();
   const [expanded, setExpanded] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const topLevel = unit.threads.filter((t) => t.parentThreadId === null);
-  // Child conclusions are folded into their parent, so the counter tracks the listed (top-level) threads.
-  const resolvedCount = topLevel.filter((t) => t.status === 'resolved').length;
-  const drafts = unit.threads.filter((t) => t.status === 'draft').length;
-  const submittable = canSubmit(unit);
+  const state = integrationState(unit);
+  const integrating = unit.integrating === true;
+  const submitted = unit.status === 'submitted';
+  // Children are folded into their parent's conclusion, so the list shows the top of each chain.
+  const concluded = unit.threads.filter(
+    (t) => t.status === 'resolved' && !unit.threads.some((p) => p.id === t.parentThreadId && p.status === 'resolved'),
+  );
 
-  const submit = async () => {
-    setSubmitting(true);
-    try {
-      await actions.submit();
-    } catch {
-      // Already reported.
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  let reason = '';
+  if (!submitted && !integrating) {
+    if (state.answering > 0) reason = `還有 ${state.answering} 串正在回答`;
+    else if (state.answered === 0) reason = '還沒有已回答的問題串';
+  }
 
   return (
     <footer className="conclusion-bar">
-      {expanded && (
+      {submitted && expanded && (
         <ol className="conclusion-list">
-          {topLevel.length === 0 && <li className="muted">還沒有問題串。</li>}
-          {topLevel.map((t) => (
+          {concluded.length === 0 && <li className="muted">沒有結論。</li>}
+          {concluded.map((t) => (
             <ConclusionItem key={t.id} thread={t} />
           ))}
         </ol>
       )}
       <div className="bar-row">
-        <button type="button" className="btn ghost" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-          {expanded ? '▾' : '▸'} 結論預覽（{resolvedCount}/{topLevel.length}）
-        </button>
+        {submitted ? (
+          <button type="button" className="btn ghost" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+            {expanded ? '▾' : '▸'} 查看結論（{concluded.length}）
+          </button>
+        ) : integrating ? (
+          <span className="bar-status" role="status">
+            正在整合結論…（{state.concluded}/{state.total}）
+          </span>
+        ) : (
+          <span className="bar-status muted">{state.answered > 0 ? `${state.answered} 串已回答` : ''}</span>
+        )}
         <span className="spacer" />
-        {!readOnly && (
-          <button type="button" className="btn" disabled={drafts === 0} onClick={() => fire(actions.sendDrafts())}>
-            送出全部草稿{drafts > 0 ? `（${drafts}）` : ''}
+        {reason && <span className="bar-reason muted">{reason}</span>}
+        {!submitted && (
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!state.canIntegrate}
+            title="為每個已回答的問題串整理一行結論，並在下一則訊息帶入主對話"
+            onClick={() => fire(actions.integrate())}
+          >
+            {integrating ? '整合中…' : '整合結論'}
           </button>
         )}
-        <button
-          type="button"
-          className="btn primary"
-          disabled={!submittable || submitting}
-          title={submittable ? '把結論打包送回主對話' : '所有問題串都結束後才能送出'}
-          onClick={() => void submit()}
-        >
-          {submitting ? '送出中…' : '送出結論'}
-        </button>
       </div>
-      {submitting && (
-        <div className="delivery muted" role="status">
-          正在送出結論…
+      {!submitted && !integrating && unit.integrationError && (
+        <div className="delivery error" role="alert">
+          整合沒有完成：{unit.integrationError}。可以再按一次「整合結論」，已整理好的結論會保留。
         </div>
       )}
-      {unit.status === 'submitted' && <DeliveryNotice unit={unit} />}
+      {submitted && <DeliveryNotice unit={unit} />}
     </footer>
   );
 }

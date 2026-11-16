@@ -69,24 +69,25 @@ describe('ConversationView', () => {
     const units = turns(2);
     view(units);
     expect(screen.getAllByRole('button', { name: '提問' })).toHaveLength(units[1].reply.blocks.length);
-    expect(screen.getAllByRole('button', { name: /送出結論/ })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /整合結論/ })).toHaveLength(1);
     expect(screen.getAllByRole('button', { name: /加入檔案/ })).toHaveLength(1);
   });
 
   it('no conclusion bar when the latest turn is stale', () => {
     view(turns(2, false));
-    expect(screen.queryByRole('button', { name: /送出結論/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /整合結論/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /加入檔案/ })).toBeNull();
   });
 
-  it("tabs list the latest turn's files with open thread counts", () => {
+  it("tabs list the latest turn's files with the threads still being answered", () => {
     const unit = turn(0, { status: 'open' });
     unit.files = [{ id: 'f1', kind: 'file', path: 'src/x.ts', content: 'line one', blocks: [], language: 'ts' }];
     unit.threads = [
-      makeThread('t1', anchorOn(unit)),
+      makeThread('t1', anchorOn(unit), { status: 'answering' }),
       makeThread('t2', anchorOn(unit), { status: 'resolved', conclusion: 'ok' }),
-      makeThread('t3', { ...anchorOn(unit), sourceId: 'f1' }),
-      makeThread('t4', { ...anchorOn(unit), sourceId: 'f1' }),
+      makeThread('t3', { ...anchorOn(unit), sourceId: 'f1' }, { status: 'answering' }),
+      makeThread('t4', { ...anchorOn(unit), sourceId: 'f1' }, { status: 'answering' }),
+      makeThread('t5', { ...anchorOn(unit), sourceId: 'f1' }),
     ];
     view([unit]);
     expect(screen.getByRole('tab', { name: /對話\s*1/ })).toBeTruthy();

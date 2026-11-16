@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, screen } from '@testing-library/react';
+import { cleanup, fireEvent, screen } from '@testing-library/react';
 import { ThreadView } from '../../src/web/components/ThreadView.js';
-import { anchorOn, assistant, makeThread, makeUnit, renderInUnit } from './fixtures.js';
+import { anchorOn, assistant, fakeActions, makeThread, makeUnit, renderInUnit } from './fixtures.js';
 
 afterEach(cleanup);
 
@@ -39,7 +39,46 @@ describe('ThreadView', () => {
     expect(screen.getByText('Roughly ten dollars.')).toBeTruthy();
     expect(screen.getByText('Per month?')).toBeTruthy();
     expect(screen.getByText('草稿')).toBeTruthy();
-    expect(screen.getAllByText('等待追問')).toHaveLength(2);
+    expect(screen.getAllByText('已回答')).toHaveLength(2);
+  });
+
+  it('an answered thread offers only a follow-up', () => {
+    const unit = makeUnit();
+    const t = makeThread('t1', anchorOn(unit));
+    unit.threads = [t];
+    renderInUnit(<ThreadView thread={t} />, unit);
+    expect(screen.getByRole('button', { name: '追問' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '結束此串' })).toBeNull();
+  });
+
+  it('a leftover draft can be sent or deleted', () => {
+    const unit = makeUnit();
+    const t = makeThread('t1', anchorOn(unit), { status: 'draft', sessionId: null });
+    unit.threads = [t];
+    const actions = fakeActions();
+    renderInUnit(<ThreadView thread={t} />, unit, actions);
+    fireEvent.click(screen.getByRole('button', { name: '送出' }));
+    expect(actions.sendThread).toHaveBeenCalledWith('t1');
+    fireEvent.click(screen.getByRole('button', { name: '刪除' }));
+    expect(actions.deleteThread).toHaveBeenCalledWith('t1');
+  });
+
+  it('nothing can be changed while conclusions are being integrated', () => {
+    const unit = makeUnit({ integrating: true });
+    const t = makeThread('t1', anchorOn(unit));
+    unit.threads = [t];
+    renderInUnit(<ThreadView thread={t} />, unit);
+    expect(screen.queryByRole('button', { name: '追問' })).toBeNull();
+  });
+
+  it('a concluded thread shows its conclusion', () => {
+    const unit = makeUnit();
+    const t = makeThread('t1', anchorOn(unit), { status: 'resolved', conclusion: 'Keep it.' });
+    unit.threads = [t];
+    renderInUnit(<ThreadView thread={t} />, unit);
+    expect(screen.getByText('有結論')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /展開/ }));
+    expect(screen.getByText('Keep it.')).toBeTruthy();
   });
 
   it('shows the error with a retry button', () => {

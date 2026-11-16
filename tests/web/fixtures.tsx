@@ -52,12 +52,10 @@ export function fakeActions(): UnitActions {
   return {
     addThread: vi.fn(async () => {}),
     deleteThread: vi.fn(async () => {}),
-    sendDrafts: vi.fn(async () => {}),
+    sendThread: vi.fn(async () => {}),
     followUp: vi.fn(async () => {}),
     retry: vi.fn(async () => {}),
-    resolve: vi.fn(async () => {}),
-    setConclusion: vi.fn(async () => {}),
-    submit: vi.fn(async () => {}),
+    integrate: vi.fn(async () => {}),
     addFile: vi.fn(async () => {}),
   };
 }

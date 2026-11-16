@@ -46,7 +46,7 @@ export function RespondingBanner({ activity, unitOpen }: Props) {
           {quietMs > QUIET_MS
             ? `已經 ${Math.floor(quietMs / 60000)} 分鐘沒有新動靜，可能在等你確認權限，或已被中斷。`
             : '完成後新的回覆會自動出現在這裡。'}
-          {unitOpen && ' 這則回覆中還沒結束的問題串，屆時會標示為過期。'}
+          {unitOpen && ' 要把這則回覆的問答帶進主對話，請在新回覆出現前按「整合結論」。'}
         </div>
       </div>
     </div>

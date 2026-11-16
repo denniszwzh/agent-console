@@ -5,8 +5,8 @@ A local review panel that sits next to the Claude Code / Codex CLI terminal.
 Every time the agent finishes a turn, a hook sends the reply (and the files it wrote that turn) to a small
 server on `127.0.0.1`. The browser panel renders it properly (Markdown, Mermaid, code highlighting, local
 images) and lets you anchor questions on any paragraph. Each question runs in its own read-only fork of the
-session, so the main conversation is never touched. When every thread is concluded you submit, and the
-one-line conclusions go back to the main session as a single bundle.
+session, so the main conversation is never touched. When you want the main session to know what came out of them,
+one click integrates a one-line conclusion per thread and sends them back as a single bundle.
 
 Everything runs locally: the server listens on `127.0.0.1` only, the UI is bundled (no CDN), and every
 `/api` call needs a token.
@@ -72,7 +72,7 @@ There is no start-at-login option; start it once per login.
 | --- | --- | --- |
 | `port` | `4317` | Port on `127.0.0.1`. |
 | `concurrency` | `3` | Maximum number of fork runs at the same time. |
-| `hardGate` | `false` | Claude only: block your next prompt while the latest review unit still has open threads (drafts count). |
+| `hardGate` | `false` | Claude only: block your next prompt while a review thread of the latest reply is still being answered, or its conclusions are being integrated. |
 | `runTimeoutMs` | `600000` | Upper bound for one fork run (answer or conclusion). On timeout the thread shows `Timed out after N min` and can be retried. |
 
 ## Hook time budget
@@ -109,7 +109,7 @@ the path the hooks report, else by searching `~/.claude/projects` (or `CLAUDE_CO
 
 Hold **Alt** and press **S** to open the quick switcher. It lists every session, the most recently changed first, with
 its name, folder, start time, last change (e.g. 「3 分鐘前」), and live status: 回應中 (with elapsed time), review
-threads being answered, open threads, and the state of the latest reply. While still holding Alt, click a session to
+threads being answered, and the state of the latest reply. While still holding Alt, click a session to
 open it. Releasing Alt, pressing Esc, or switching away from the window closes the switcher. The shortcut
 works only while the panel's browser tab has focus.
 
@@ -123,7 +123,7 @@ panel remembers it). Claude sessions are marked in orange, Codex sessions in gre
 Selecting a session shows the whole session as one conversation, like the terminal: each turn's prompts, then the
 agent's reply, oldest first, opened at the bottom. Scrolling up loads earlier turns. A new reply is followed when the
 view is at the bottom; otherwise a 「↓ 新回覆」 button appears. Only the newest turn can be reviewed while it is open:
-its changed files are tabs above the conversation, and the conclusion bar and 「＋ 加入檔案」 belong to it. Earlier
+its changed files are tabs above the conversation, and 「整合結論」 and 「＋ 加入檔案」 belong to it. Earlier
 turns are read-only; their changed files open as temporary tabs.
 
 The prompts come from the agent's transcript. The server reads them when a reply arrives, and fills in earlier
@@ -157,16 +157,35 @@ folder included). Symlinks are not followed, secret-looking names (`.env*`, `*.p
 Console data folder is scanned. At most 30 files are added per turn, newest first; the panel says how many were left
 out and whether the walk ran out of budget. Deleted files are not listed.
 
+## Asking and integrating conclusions
+
+Select text in a reply, a changed file or an answer (or use 「提問」 on a paragraph), type the question and press
+**送出**: the thread is created and its fork starts answering at once. A question on an answer opens a nested thread,
+forked from that answer's session. In an answered thread, **追問** continues in the same fork. Each thread is sent on
+its own, whenever you like; there are no drafts to collect first.
+
+Nothing goes back to the main session until you press **整合結論** at the bottom right of the conversation. It can be
+pressed when the latest reply is still under review, at least one thread has its answer, and no thread is still being
+answered (the bar says how many are). Agent Console then writes a one-line conclusion for every answered thread,
+reusing each thread's fork (children first, so a parent's conclusion includes its children's), and submits them
+together. Threads whose answer failed, and unsent drafts left from older versions, are left out and do not block it.
+While it runs, the bar shows the progress and the threads cannot be changed. If a conclusion fails, the integration
+stops, the thread stays answered and the bar says why; pressing it again only redoes the threads without a conclusion.
+A restart during an integration counts as such a failure.
+
+If you do not integrate and the main session moves on, the earlier reply becomes read-only history: its questions
+and answers stay readable, and nothing from them reaches the main session.
+
 ## How the conclusions get back
 
-**Claude.** After you submit, send any next message in the terminal (for example "apply the review
+**Claude.** After the conclusions are integrated, send any next message in the terminal (for example "apply the review
 conclusions"). The `UserPromptSubmit` hook injects the bundle into that turn. Delivery is two-phase: the hook writes
 the bundle and then acknowledges it, and only the acknowledgement marks the unit as delivered, so a hook that is
 killed half-way injects the same bundle again next time rather than losing it. The bundle starts with the absolute
 path of the bundle file (`~/.agent-console/conclusions/<unit>.md`). If the session was `/clear`ed or closed, the panel
 shows that path with a copy button so you can ask Claude to read it.
 
-**Codex.** Codex has no prompt-injection hook. On submit the server tries `codex queue` once (10 s, best effort) with
+**Codex.** Codex has no prompt-injection hook. Once the conclusions are integrated the server tries `codex queue` once (10 s, best effort) with
 an English instruction ("Read the review conclusions in <path> and apply them."). The panel always shows the same
 instruction with a copy button; paste it into Codex if the next turn did not pick it up.
 
@@ -200,8 +219,8 @@ remove all data.
 
 - Claude plan-mode plans (ExitPlanMode) are not captured; plans written to files are.
 - Answers stream per message, not per token.
-- Only the newest review unit of a session can take new questions; older ones become read-only history and their
-  open threads are marked expired.
+- Only the newest review unit of a session can take new questions; older ones become read-only history (threads
+  still unsent or being answered at that point are marked expired).
 - Codex: only `apply_patch` edits are detected as changed files, also when Codex applies the patch from code mode
   (read from the rollout's `FileChange` items). Files written by shell commands are found only by the end-of-turn
   scan (see above); add others with 「+ 加入檔案」. A Codex turn without a rollout path yields no files; deletions (and, in older rollouts without `FileChange` items, the source of a move) are shown as errors. `codex queue` into a running TUI is best effort.

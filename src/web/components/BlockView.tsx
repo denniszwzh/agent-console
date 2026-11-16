@@ -118,7 +118,7 @@ export function BlockView({ block, sourceId, parentThreadId, mode = 'markdown', 
         <Composer
           quote={composerQuote === block.text ? undefined : composerQuote}
           placeholder={parentThreadId ? '針對這段回答提出子問題…' : '針對這段提出問題…'}
-          submitLabel="加入草稿"
+          submitLabel="送出"
           onSubmit={ask}
           onCancel={() => setComposerQuote(null)}
         />
