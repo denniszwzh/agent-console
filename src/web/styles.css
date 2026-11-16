@@ -1522,3 +1522,105 @@ textarea {
   margin-left: 1.25rem;
   margin-right: 1.25rem;
 }
+
+/* ---- Conversation view -------------------------------------------------- */
+
+/* The conversation and the file pane scroll on their own; the main column does not. */
+.main {
+  overflow: hidden;
+}
+.conversation {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.conversation-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1.25rem 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.conversation-project {
+  font-weight: 600;
+  color: var(--text-soft);
+}
+.conversation-worktree {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversation .tabs {
+  position: static;
+}
+.stream,
+.file-pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.stream {
+  position: relative;
+}
+.stream[hidden] {
+  display: none;
+}
+.stream-content {
+  padding-bottom: 2rem;
+}
+.stream-start {
+  display: block;
+  margin: 1rem auto 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: center;
+}
+.turn-reply {
+  padding: 0 1.25rem;
+}
+.turn-reply > .agent-badge {
+  margin: 0 0 0.35rem;
+}
+.file-pane {
+  padding: 1rem 1.25rem 3rem;
+}
+.new-turn {
+  position: sticky;
+  bottom: 1rem;
+  display: block;
+  margin: 0 1.25rem 0 auto;
+  box-shadow: var(--shadow);
+}
+.tab-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+.tab-close {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 0.3rem;
+  font-size: 0.9rem;
+}
+.tab-close:hover {
+  color: var(--text);
+}
+.main > .banner-responding {
+  margin: 0.5rem 1.25rem;
+}
+.layout-compact .conversation-head,
+.layout-compact .turn-reply,
+.layout-compact .file-pane {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+.layout-compact .turn-prompts,
+.layout-compact .turn-divider,
+.layout-compact .turn-files {
+  margin-left: 0.5rem;
+  margin-right: 0.5rem;
+}

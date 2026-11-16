@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { splitBlocks } from '../../src/shared/blocks.js';
-import { UnitView } from '../../src/web/components/UnitView.js';
+import { TurnView } from '../../src/web/components/TurnView.js';
 import { fakeActions, makeUnit } from './fixtures.js';
 
 afterEach(() => {
@@ -26,7 +26,7 @@ describe('BlockView selection questions', () => {
   it('asks about the selected text with the composer focused', async () => {
     const unit = makeUnit();
     const actions = fakeActions();
-    render(<UnitView unit={unit} actions={actions} />);
+    render(<TurnView unit={unit} actions={actions} latest turnNumber={1} onOpenFile={() => {}} />);
     selectStartOf(screen.getByText('First paragraph.'), 5);
     fireEvent.click(screen.getByTitle('針對選取的文字提問'));
     const textarea = screen.getByPlaceholderText('針對這段提出問題…');
@@ -44,7 +44,7 @@ describe('BlockView selection questions', () => {
   });
 
   it('hides the selection button once the selection collapses', () => {
-    render(<UnitView unit={makeUnit()} actions={fakeActions()} />);
+    render(<TurnView unit={makeUnit()} actions={fakeActions()} latest turnNumber={1} onOpenFile={() => {}} />);
     selectStartOf(screen.getByText('First paragraph.'), 5);
     expect(screen.queryByTitle('針對選取的文字提問')).not.toBeNull();
     act(() => {
@@ -57,7 +57,7 @@ describe('BlockView selection questions', () => {
   it('requests local images together with the source that references them', () => {
     const content = 'See ![flow](img/flow.png)';
     const unit = makeUnit({ reply: { id: 'reply-1', kind: 'reply', content, blocks: splitBlocks(content, 'markdown') } });
-    const { container } = render(<UnitView unit={unit} actions={fakeActions()} />);
+    const { container } = render(<TurnView unit={unit} actions={fakeActions()} latest turnNumber={1} onOpenFile={() => {}} />);
     expect(container.querySelector('img')?.getAttribute('src')).toBe(
       '/api/units/unit-1/image?source=reply-1&path=img%2Fflow.png',
     );
@@ -66,7 +66,7 @@ describe('BlockView selection questions', () => {
   it('numbers each ordered list item by its position in the list', () => {
     const content = '1. one\n1. two\n1. three';
     const unit = makeUnit({ reply: { id: 'reply-1', kind: 'reply', content, blocks: splitBlocks(content, 'markdown') } });
-    const { container } = render(<UnitView unit={unit} actions={fakeActions()} />);
+    const { container } = render(<TurnView unit={unit} actions={fakeActions()} latest turnNumber={1} onOpenFile={() => {}} />);
     const lists = [...container.querySelectorAll('ol')];
     expect(lists.map((ol) => ol.getAttribute('start') ?? '1')).toEqual(['1', '2', '3']);
     expect(lists.map((ol) => ol.textContent?.trim())).toEqual(['one', 'two', 'three']);
