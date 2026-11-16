@@ -3,6 +3,7 @@ import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import type { AgentKind, SessionActivity } from '../shared/types.js';
 import type { EventBus } from './events.js';
+import { cleanPromptText } from './turn-prompts.js';
 
 /** How often active sessions' transcripts are checked for an interrupt. */
 const POLL_MS = 2000;
@@ -36,6 +37,10 @@ export interface StartInput {
   prompt?: string;
   /** Codex turn id; lets a late Interrupt for an earlier turn leave the current one alone. */
   turnId?: string;
+  /** When the turn started, if earlier than now (a turn recovered from the transcript after a restart). */
+  since?: string;
+  /** When the transcript last changed, if known (epoch ms). */
+  lastChangeMs?: number;
 }
 
 /** True when a transcript line is the user-side record Claude Code writes when a turn is interrupted. */
@@ -55,10 +60,21 @@ export function isInterruptRecord(line: string): boolean {
   }
 }
 
-function previewOf(prompt: string | undefined): string | undefined {
+const PEER_MESSAGE = /^(?:Another Claude session sent a message:\s*)?<agent-message[\s>]/;
+const TASK_NOTICE = /^<task-notification[\s>]/;
+
+/**
+ * One line describing what started a turn: the first line of what the user wrote, or a label for a
+ * message another session or a background task sent. Undefined for other injected text.
+ */
+export function previewOf(prompt: string | undefined): string | undefined {
   if (!prompt) return undefined;
-  const line = prompt.split(/\r?\n/).find((l) => l.trim()) ?? '';
-  const t = line.trim();
+  const raw = prompt.trim();
+  if (PEER_MESSAGE.test(raw)) return '其他工作階段傳來的訊息';
+  if (TASK_NOTICE.test(raw)) return '背景工作完成通知';
+  const cleaned = cleanPromptText(prompt);
+  if (!cleaned) return undefined;
+  const t = (cleaned.split(/\r?\n/).find((l) => l.trim()) ?? '').trim();
   if (!t) return undefined;
   return t.length > PROMPT_PREVIEW ? `${t.slice(0, PROMPT_PREVIEW)}…` : t;
 }
@@ -99,6 +115,11 @@ export class ActivityTracker {
     return [...this.entries.values()].map((e) => ({ ...e.activity, lastChange: new Date(e.lastChangeMs).toISOString() }));
   }
 
+  /** Transcript path reported by the prompt hook for a session's current turn. */
+  transcriptPathFor(sessionId: string): string | undefined {
+    return this.entries.get(sessionId)?.transcriptPath;
+  }
+
   /** Start time (epoch ms) of a session's current turn, if one is active. */
   startedAt(sessionId: string): number | undefined {
     const e = this.entries.get(sessionId);
@@ -108,13 +129,16 @@ export class ActivityTracker {
   start(input: StartInput): void {
     const nowMs = this.now();
     const transcriptPath = acceptableTranscriptPath(input.transcriptPath);
+    const sinceMs = input.since ? Date.parse(input.since) : NaN;
+    const since = Number.isNaN(sinceMs) ? new Date(nowMs).toISOString() : new Date(sinceMs).toISOString();
+    const lastChangeMs = input.lastChangeMs ?? nowMs;
     this.entries.set(input.sessionId, {
       activity: {
         sessionId: input.sessionId,
         agent: input.agent,
         cwd: input.cwd ?? '',
-        since: new Date(nowMs).toISOString(),
-        lastChange: new Date(nowMs).toISOString(),
+        since,
+        lastChange: new Date(lastChangeMs).toISOString(),
         prompt: previewOf(input.prompt),
       },
       transcriptPath,
@@ -122,7 +146,7 @@ export class ActivityTracker {
       offset: (transcriptPath && fileSize(transcriptPath)) || 0,
       partial: '',
       decoder: new StringDecoder('utf8'),
-      lastChangeMs: nowMs,
+      lastChangeMs,
       lastEmitMs: nowMs,
       turnId: input.turnId || undefined,
     });

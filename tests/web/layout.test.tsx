@@ -92,7 +92,7 @@ describe('Sidebar', () => {
         sessions={[]}
         unitsBySession={{}}
         selectedSession={null}
-        selectedUnit={null}
+       
         onSelect={() => {}}
         onHide={() => {
           hidden = true;
@@ -101,5 +101,63 @@ describe('Sidebar', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: '隱藏側欄' }));
     expect(hidden).toBe(true);
+  });
+
+  it('shows the session title with the folder below', () => {
+    const base = { sessionId: 's1', agent: 'claude' as const, cwd: 'C:\\p\\stock', lastActivity: '2026-11-16T10:00:00.000Z' };
+    const { container, rerender } = render(
+      <Sidebar sessions={[{ ...base, title: 'K棒反向交易功能', titleSource: 'agent' }]} unitsBySession={{}} selectedSession={null} onSelect={() => {}} />,
+    );
+    const title = container.querySelector('.session-project')!;
+    expect(title.textContent).toBe('K棒反向交易功能');
+    expect(title.classList.contains('untitled')).toBe(false);
+    expect(container.querySelector('.project-head')!.textContent).toContain('stock');
+    rerender(
+      <Sidebar sessions={[{ ...base, title: '幫我看 README', titleSource: 'prompt' }]} unitsBySession={{}} selectedSession={null} onSelect={() => {}} />,
+    );
+    expect(container.querySelector('.session-project')!.classList.contains('untitled')).toBe(true);
+  });
+});
+
+describe('Sidebar groups', () => {
+  const repo = { key: 'c:/p/repo', root: 'C:/p/repo' };
+  const sessions = [
+    { sessionId: 'a', agent: 'claude' as const, cwd: 'C:/p/repo/.claude/worktrees/feat-x', lastActivity: '2026-11-16T10:00:00.000Z', title: '甲', project: { ...repo, worktree: 'feat-x' } },
+    { sessionId: 'b', agent: 'codex' as const, cwd: 'C:/p/other', lastActivity: '2026-11-16T09:00:00.000Z', title: '乙', project: { key: 'c:/p/other', root: 'C:/p/other' } },
+    { sessionId: 'c', agent: 'claude' as const, cwd: 'C:/p/repo', lastActivity: '2026-11-16T08:00:00.000Z', title: '丙', project: repo },
+  ];
+  const titles = (c: HTMLElement) => [...c.querySelectorAll('.session-project')].map((e) => e.textContent);
+
+  it('groups sessions by project and collapses a group', () => {
+    const view = render(<Sidebar sessions={sessions} unitsBySession={{}} selectedSession={null} onSelect={() => {}} />);
+    const heads = [...view.container.querySelectorAll('.project-head')];
+    expect(heads.map((h) => h.textContent)).toEqual([expect.stringContaining('repo'), expect.stringContaining('other')]);
+    expect(titles(view.container)).toEqual(['甲', '丙', '乙']);
+    fireEvent.click(heads[0]);
+    expect(heads[0].getAttribute('aria-expanded')).toBe('false');
+    expect(titles(view.container)).toEqual(['乙']);
+    view.unmount();
+    const again = render(<Sidebar sessions={sessions} unitsBySession={{}} selectedSession={null} onSelect={() => {}} />);
+    expect(titles(again.container)).toEqual(['乙']);
+  });
+
+  it('selects a session by id', () => {
+    const picked: string[] = [];
+    render(<Sidebar sessions={sessions} unitsBySession={{}} selectedSession={null} onSelect={(id) => picked.push(id)} />);
+    fireEvent.click(screen.getByText('乙'));
+    expect(picked).toEqual(['b']);
+  });
+
+  it('no longer lists earlier replies', () => {
+    const u = { id: 'u1', sessionId: 'a', createdAt: '2026-11-16T10:00:00.000Z', status: 'open', reply: { content: 'x' }, threads: [] };
+    const { container } = render(
+      <Sidebar sessions={sessions} unitsBySession={{ a: [u as never] }} selectedSession="a" onSelect={() => {}} />,
+    );
+    expect(container.querySelector('.unit-history')).toBeNull();
+  });
+
+  it('shows the worktree name', () => {
+    const { container } = render(<Sidebar sessions={sessions} unitsBySession={{}} selectedSession={null} onSelect={() => {}} />);
+    expect(container.querySelector('.session-meta')!.textContent).toContain('worktree: feat-x');
   });
 });

@@ -64,6 +64,14 @@ export interface Thread {
   error?: string;
 }
 
+/** A prompt the user sent in the main session (read from the agent's transcript). */
+export interface TurnPrompt {
+  text: string;
+  at: string;
+  /** Agent Console's own "apply the review conclusions" instruction, not typed by the user. */
+  delivery?: boolean;
+}
+
 export type UnitStatus = 'open' | 'submitted' | 'stale';
 
 export interface ReviewUnit {
@@ -84,6 +92,15 @@ export interface ReviewUnit {
   warnings: { at: string; threadId: string; paths: string[] }[];
   /** Set when the end-of-turn scan left files out (over the per-turn cap) or did not finish its walk. */
   scanNotice?: { omitted: number; incomplete: boolean };
+  /** The agent's transcript (Claude) or rollout (Codex) as reported by the Stop hook; used to read the session name. */
+  transcriptPath?: string;
+  /**
+   * The prompts that led to this reply, oldest first (at most the newest few; see promptsOmitted).
+   * Undefined until read from the transcript; [] when read and none was found.
+   */
+  prompts?: TurnPrompt[];
+  /** Earlier prompts of the same turn left out of `prompts`. */
+  promptsOmitted?: number;
 }
 
 export interface Config {
@@ -100,6 +117,15 @@ export interface SessionSummary {
   agent: AgentKind;
   cwd: string;
   lastActivity: string;
+  /** The agent's own session name, or the first prompt when it has none (see titleSource). */
+  title?: string;
+  titleSource?: 'agent' | 'prompt';
+  /** When the session started (first transcript record). */
+  createdAt?: string;
+  /** Last time the session's transcript changed. */
+  lastModified?: string;
+  /** The project the session's folder belongs to (the main repository for a git worktree). */
+  project?: { key: string; root: string; worktree?: string };
 }
 
 /** A main session that is working on a turn right now (GET /api/activity). */

@@ -13,8 +13,9 @@ import type { UnitStore } from '../store.js';
 import type { ForkRegistry } from '../app.js';
 import { buildConclusionBundle } from '../conclusion.js';
 import { conclusionFile, pathKey } from '../paths.js';
-import type { ActivityTracker } from '../activity.js';
+import { acceptableTranscriptPath, type ActivityTracker } from '../activity.js';
 import { MAX_SCAN_FILES, scanTurnFiles, type TurnScan } from '../turn-files.js';
+import { promptsInWindow, readUserPrompts } from '../turn-prompts.js';
 
 export type TurnScanner = (cwd: string, sinceMs: number) => Promise<TurnScan | null>;
 
@@ -67,6 +68,20 @@ export function registerHookRoutes(
       if (queues.get(sessionId) === tail) queues.delete(sessionId);
     });
     return run;
+  };
+
+  /** Adds the prompts that led to a reply, read from the agent's transcript; leaves it unset when unreadable. */
+  const fillPrompts = async (agent: AgentKind, unitId: string, transcriptPath: string, after: string | undefined) => {
+    const all = await readUserPrompts(agent, transcriptPath);
+    if (all === null) return;
+    // Synchronous from here: thread runs save the same unit, and their changes must not be lost.
+    const unit = store.get(unitId);
+    if (!unit || unit.prompts !== undefined) return;
+    const { prompts, omitted } = promptsInWindow(all, after, unit.createdAt);
+    unit.prompts = prompts;
+    if (omitted > 0) unit.promptsOmitted = omitted;
+    store.save(unit);
+    bus.emit({ type: 'unit.updated', unitId, sessionId: unit.sessionId });
   };
 
   /**
@@ -127,7 +142,11 @@ export function registerHookRoutes(
         delivered: false,
         warnings: [],
         ...(scanNotice ? { scanNotice } : {}),
+        ...(acceptableTranscriptPath(transcriptPath) ? { transcriptPath } : {}),
       };
+
+      // The previous reply bounds this turn's prompts; read before the new unit exists.
+      const previous = store.latestForSession(sessionId);
 
       // Supersede earlier open units of this session before the new one exists.
       const staled: ReviewUnit[] = [];
@@ -147,6 +166,13 @@ export function registerHookRoutes(
         bus.emit({ type: 'unit.updated', unitId: prev.id, sessionId });
       }
       bus.emit({ type: 'unit.created', unitId: unit.id, sessionId });
+      // Reading the transcript can take a while: the reply is already shown, and the hook is not kept waiting.
+      if (unit.transcriptPath) {
+        const file = unit.transcriptPath;
+        inOrder(sessionId, () => fillPrompts(agent, unit.id, file, previous?.createdAt)).catch((e: unknown) =>
+          console.warn(`[hooks] could not read prompts for ${unit.id}: ${(e as Error).message}`),
+        );
+      }
       return { unitId: unit.id };
     });
   };

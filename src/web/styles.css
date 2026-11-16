@@ -24,6 +24,10 @@
   --warn-soft: #fff3d6;
   --ok: #1f7a4d;
   --ok-soft: #e3f3ea;
+  --agent-claude: #c96442;
+  --agent-claude-soft: #f8e9e2;
+  --agent-codex: var(--ok);
+  --agent-codex-soft: var(--ok-soft);
   --shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 4px 16px rgb(0 0 0 / 0.04);
   --radius: 8px;
   color-scheme: light;
@@ -50,6 +54,8 @@
     --warn-soft: #36290f;
     --ok: #7ccaa0;
     --ok-soft: #183026;
+    --agent-claude: #e08a6a;
+    --agent-claude-soft: #3a2219;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.25);
     color-scheme: dark;
   }
@@ -243,14 +249,48 @@ textarea {
   color: var(--muted);
   font-size: 0.875rem;
 }
-.session-list,
-.unit-history {
+.project-list,
+.session-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.session-btn,
-.unit-btn {
+.project-group + .project-group {
+  margin-top: 0.35rem;
+}
+.project-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.35rem 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.project-head:hover {
+  background: var(--accent-faint);
+}
+.project-caret {
+  width: 0.8rem;
+  color: var(--muted);
+}
+.project-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-group .session-list {
+  margin-left: 0.6rem;
+}
+.session-btn {
   display: flex;
   width: 100%;
   border: 0;
@@ -264,8 +304,7 @@ textarea {
   gap: 0.6rem;
   padding: 0.5rem 0.75rem;
 }
-.session-btn:hover,
-.unit-btn:hover {
+.session-btn:hover {
   background: var(--accent-faint);
 }
 .session.selected > .session-btn {
@@ -279,8 +318,11 @@ textarea {
   border-radius: 50%;
   background: var(--accent);
 }
+.agent-dot.agent-claude {
+  background: var(--agent-claude);
+}
 .agent-dot.agent-codex {
-  background: var(--ok);
+  background: var(--agent-codex);
 }
 .session-name {
   display: flex;
@@ -294,8 +336,17 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.session-meta,
-.unit-btn-meta {
+/* A first prompt standing in for a missing session name. */
+.session-project.untitled {
+  font-weight: 500;
+  color: var(--text-soft);
+}
+.session-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-meta {
   font-size: 0.75rem;
   color: var(--muted);
 }
@@ -307,26 +358,6 @@ textarea {
   color: var(--warn);
   font-size: 0.75rem;
   font-weight: 600;
-}
-.unit-history {
-  margin: 0.25rem 0 0.5rem 1.4rem;
-  border-left: 1px solid var(--border-strong);
-}
-.unit-btn {
-  flex-direction: column;
-  padding: 0.35rem 0.75rem;
-  border-radius: 0 6px 6px 0;
-}
-.unit-btn.selected {
-  background: var(--accent-soft);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-.unit-btn-line {
-  font-size: 0.85rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
 }
 
 /* ---- Unit header, banners, tabs ---------------------------------------- */
@@ -353,6 +384,14 @@ textarea {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 0.7rem;
+}
+.agent-badge.agent-claude {
+  background: var(--agent-claude-soft);
+  color: var(--agent-claude);
+}
+.agent-badge.agent-codex {
+  background: var(--agent-codex-soft);
+  color: var(--agent-codex);
 }
 .unit-cwd {
   font-family: var(--font-mono);
@@ -1284,4 +1323,306 @@ textarea {
   .responding-dot {
     animation: none;
   }
+}
+
+/* Quick session switcher (hold Alt+S). */
+.switcher-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10vh 1rem 1rem;
+  background: rgb(0 0 0 / 0.28);
+}
+.switcher {
+  width: min(44rem, 100%);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: calc(var(--radius) + 4px);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.25);
+  overflow: hidden;
+}
+.switcher-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.switcher-empty {
+  margin: 0;
+  padding: 1rem;
+  color: var(--muted);
+}
+.switcher-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem;
+  overflow-y: auto;
+}
+.switcher-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.switcher-item:hover,
+.switcher-item:focus-visible {
+  background: var(--accent-faint);
+  border-color: var(--border);
+}
+.switcher-item.current {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.switcher-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.switcher-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.switcher-title.untitled {
+  font-weight: 500;
+  color: var(--text-soft);
+}
+.switcher-badges {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.switcher-answering,
+.switcher-status {
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.switcher-answering {
+  background: var(--accent-faint);
+  color: var(--accent);
+}
+.switcher-status {
+  background: var(--panel);
+  color: var(--muted);
+}
+.switcher-status.status-open {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.switcher-path,
+.switcher-times {
+  padding-left: 1rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.switcher-path {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+}
+
+/* ---- Conversation turns ------------------------------------------------- */
+
+.turn {
+  padding: 0.5rem 0 1rem;
+}
+.turn-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.75rem 1.25rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.turn-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--border);
+  order: 1;
+}
+.turn-divider .unit-status {
+  order: 2;
+  margin-left: 0;
+}
+.turn-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0 1.25rem 0.75rem;
+}
+.turn-prompts-omitted {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.turn-prompt {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius);
+  background: var(--accent-faint);
+  border: 1px solid var(--border);
+}
+.turn-prompt-who {
+  flex: none;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+.turn-prompt-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.turn-prompt-more {
+  display: block;
+  margin-top: 0.25rem;
+}
+.turn-prompt-delivery {
+  background: transparent;
+  border-style: dashed;
+  flex-direction: column;
+}
+.turn-reply > .agent-badge {
+  display: inline-block;
+  margin: 0 1.25rem 0.25rem;
+}
+.turn-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.25rem 1.25rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.turn .banner {
+  margin-left: 1.25rem;
+  margin-right: 1.25rem;
+}
+
+/* ---- Conversation view -------------------------------------------------- */
+
+/* The conversation and the file pane scroll on their own; the main column does not. */
+.main {
+  overflow: hidden;
+}
+.conversation {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.conversation-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1.25rem 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.conversation-project {
+  font-weight: 600;
+  color: var(--text-soft);
+}
+.conversation-worktree {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversation .tabs {
+  position: static;
+}
+.stream,
+.file-pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.stream {
+  position: relative;
+}
+.stream[hidden] {
+  display: none;
+}
+.stream-content {
+  padding-bottom: 2rem;
+}
+.stream-start {
+  display: block;
+  margin: 1rem auto 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: center;
+}
+.turn-reply {
+  padding: 0 1.25rem;
+}
+.turn-reply > .agent-badge {
+  margin: 0 0 0.35rem;
+}
+.file-pane {
+  padding: 1rem 1.25rem 3rem;
+}
+.new-turn {
+  position: sticky;
+  bottom: 1rem;
+  display: block;
+  margin: 0 1.25rem 0 auto;
+  box-shadow: var(--shadow);
+}
+.tab-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+.tab-close {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 0.3rem;
+  font-size: 0.9rem;
+}
+.tab-close:hover {
+  color: var(--text);
+}
+.main > .banner-responding {
+  margin: 0.5rem 1.25rem;
+}
+.layout-compact .conversation-head,
+.layout-compact .turn-reply,
+.layout-compact .file-pane {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+.layout-compact .turn-prompts,
+.layout-compact .turn-divider,
+.layout-compact .turn-files {
+  margin-left: 0.5rem;
+  margin-right: 0.5rem;
 }

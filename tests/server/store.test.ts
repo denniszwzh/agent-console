@@ -156,3 +156,15 @@ describe('UnitStore unit id safety (final review item 5)', () => {
     }
   });
 });
+
+describe('UnitStore transcript paths', () => {
+  it('remembers the transcript path of the latest unit', () => {
+    const store = new UnitStore();
+    store.save({ ...makeUnit('u1', 's1', '2026-01-01T00:00:00.000Z'), transcriptPath: 'C:\a.jsonl' });
+    store.save({ ...makeUnit('u2', 's1', '2026-01-02T00:00:00.000Z'), transcriptPath: 'C:\b.jsonl' });
+    store.save(makeUnit('u3', 's2', '2026-01-03T00:00:00.000Z'));
+    expect(store.transcriptPathFor('s1')).toBe('C:\b.jsonl');
+    expect(store.transcriptPathFor('s2')).toBeUndefined();
+    expect(new UnitStore().transcriptPathFor('s1')).toBe('C:\b.jsonl');
+  });
+});

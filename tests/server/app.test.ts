@@ -7,6 +7,9 @@ import net from 'node:net';
 import { buildApp } from '../../src/server/app.js';
 import { EventBus } from '../../src/server/events.js';
 import { UnitStore } from '../../src/server/store.js';
+import { ActivityTracker } from '../../src/server/activity.js';
+import { pathKey } from '../../src/server/paths.js';
+import type { SessionMeta, SessionMetaService } from '../../src/server/session-meta.js';
 
 const TOKEN = 'secret-token';
 const PORT = 4317;
@@ -167,6 +170,99 @@ describe('SSE', () => {
       expect(bus.subscriberCount()).toBe(0);
     } finally {
       await app.close();
+    }
+  });
+});
+
+describe('GET /api/sessions with transcript meta', () => {
+  const headers = { host: HOST, authorization: `Bearer ${TOKEN}` };
+  const unit = (id: string, sessionId: string, createdAt: string, transcriptPath?: string) => ({
+    id,
+    agent: 'claude' as const,
+    sessionId,
+    cwd: 'C:\work',
+    createdAt,
+    reply: { id: 'r', kind: 'reply' as const, content: 'hi', blocks: [] },
+    files: [],
+    threads: [],
+    status: 'open' as const,
+    delivered: false,
+    warnings: [],
+    ...(transcriptPath ? { transcriptPath } : {}),
+  });
+  const fakeMeta = (result: SessionMeta) => {
+    const calls: unknown[][] = [];
+    const svc = { describe: (...args: unknown[]) => (calls.push(args), result) } as unknown as SessionMetaService;
+    return { svc, calls };
+  };
+
+  it('merges transcript meta into the session list', async () => {
+    const store = new UnitStore();
+    store.save(unit('u1', 's1', '2026-11-16T01:00:00.000Z', 'C:\t\s1.jsonl'));
+    const meta = { title: '名稱', titleSource: 'agent' as const, createdAt: '2026-11-15T00:00:00.000Z', lastModified: '2026-11-16T00:00:00.000Z' };
+    const { svc, calls } = fakeMeta(meta);
+    const res = await buildApp({ store, token: TOKEN, port: PORT, sessionMeta: svc }).inject({ method: 'GET', url: '/api/sessions', headers });
+    expect(res.json()).toEqual([{ sessionId: 's1', agent: 'claude', cwd: 'C:\work', lastActivity: '2026-11-16T01:00:00.000Z', ...meta }]);
+    expect(calls).toEqual([['claude', 's1', 'C:\t\s1.jsonl']]);
+  });
+
+  it('lists sessions without transcript meta', async () => {
+    const store = new UnitStore();
+    store.save(unit('u1', 's1', '2026-11-16T01:00:00.000Z'));
+    const res = await buildApp({ store, token: TOKEN, port: PORT, sessionMeta: fakeMeta({}).svc }).inject({ method: 'GET', url: '/api/sessions', headers });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([{ sessionId: 's1', agent: 'claude', cwd: 'C:\work', lastActivity: '2026-11-16T01:00:00.000Z' }]);
+  });
+
+  it('lists a responding session that has no reply yet', async () => {
+    const bus = new EventBus();
+    const activity = new ActivityTracker(bus);
+    try {
+      activity.start({ sessionId: 's9', agent: 'codex', cwd: 'C:/w' });
+      const { svc, calls } = fakeMeta({});
+      const res = await buildApp({ store: new UnitStore(), token: TOKEN, port: PORT, bus, activity, sessionMeta: svc }).inject({
+        method: 'GET',
+        url: '/api/sessions',
+        headers,
+      });
+      // 'C:/w' is absolute on Windows only, so the project is compared separately.
+      expect(res.json()).toMatchObject([{ sessionId: 's9', agent: 'codex', cwd: 'C:/w', lastActivity: activity.list()[0].since }]);
+      expect(calls).toEqual([['codex', 's9', undefined]]);
+    } finally {
+      activity.close();
+    }
+  });
+
+  it('adds the project to each session', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ac-proj-'));
+    try {
+      mkdirSync(join(dir, '.git'));
+      mkdirSync(join(dir, 'src'));
+      const store = new UnitStore();
+      store.save({ ...unit('u1', 's1', '2026-11-16T01:00:00.000Z'), cwd: join(dir, 'src') });
+      const res = await buildApp({ store, token: TOKEN, port: PORT, sessionMeta: fakeMeta({}).svc }).inject({ method: 'GET', url: '/api/sessions', headers });
+      expect(res.json()[0].project).toEqual({ key: pathKey(dir), root: dir });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps reply order, with responding sessions that have no reply on top', async () => {
+    const bus = new EventBus();
+    const activity = new ActivityTracker(bus);
+    try {
+      const store = new UnitStore();
+      store.save(unit('u1', 'old-reply', '2026-11-16T01:00:00.000Z'));
+      store.save(unit('u2', 'new-reply', '2026-11-16T02:00:00.000Z'));
+      activity.start({ sessionId: 'fresh', agent: 'claude', cwd: 'C:/w' });
+      // A later transcript change must not move a session up: the sidebar would reshuffle under the pointer.
+      const svc = {
+        describe: (_a: string, id: string) => (id === 'old-reply' ? { lastModified: '2026-11-16T03:00:00.000Z' } : {}),
+      } as unknown as SessionMetaService;
+      const res = await buildApp({ store, token: TOKEN, port: PORT, bus, activity, sessionMeta: svc }).inject({ method: 'GET', url: '/api/sessions', headers });
+      expect(res.json().map((s: { sessionId: string }) => s.sessionId)).toEqual(['fresh', 'new-reply', 'old-reply']);
+    } finally {
+      activity.close();
     }
   });
 });

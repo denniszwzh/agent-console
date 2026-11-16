@@ -7,13 +7,15 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import type { UnitStore } from './store.js';
 import { EventBus } from './events.js';
+import { projectOf } from './project.js';
 import { ActivityTracker } from './activity.js';
 import { createCodexQueueRunner, type CodexQueueRunner } from '../agents/codex.js';
 import { registerHookRoutes, type TurnScanner } from './routes/hooks.js';
 import { registerUnitRoutes } from './routes/units.js';
 import type { ThreadEngine } from './threads.js';
 import { readConfig } from './paths.js';
-import type { Config } from '../shared/types.js';
+import { SessionMetaService, defaultSessionMetaOptions } from './session-meta.js';
+import type { Config, SessionSummary } from '../shared/types.js';
 
 /** Implemented by the thread engine so ingestion can skip sessions it forked itself. */
 export interface ForkRegistry {
@@ -36,6 +38,8 @@ export interface AppDeps {
   config?: Config;
   /** Sends a message to a Codex thread queue on submit; defaults to the real `codex queue`. */
   codexQueue?: CodexQueueRunner;
+  /** Reads session names and times from agent transcripts; defaults to the real ~/.claude and ~/.codex. */
+  sessionMeta?: SessionMetaService;
   /** Directory of the built web UI; defaults to <package>/dist/web. */
   webRoot?: string;
 }
@@ -80,10 +84,33 @@ function readCookie(header: string | undefined, name: string): string | null {
   return null;
 }
 
+/**
+ * Sessions responding before their first reply, then sessions with replies (newest reply first), each
+ * with its name and times from the agent's transcript. The order ignores transcript changes on purpose:
+ * the sidebar would otherwise reshuffle while sessions respond. The quick switcher sorts on its own.
+ */
+function listSessions(store: UnitStore, activity: ActivityTracker, meta: SessionMetaService): SessionSummary[] {
+  const replied = store.listSessions();
+  const known = new Set(replied.map((s) => s.sessionId));
+  const fresh: SessionSummary[] = activity
+    .list()
+    .filter((a) => !known.has(a.sessionId))
+    .map((a) => ({ sessionId: a.sessionId, agent: a.agent, cwd: a.cwd, lastActivity: a.since }));
+  return [...fresh, ...replied].map((s) => {
+    const project = projectOf(s.cwd);
+    return {
+      ...s,
+      ...meta.describe(s.agent, s.sessionId, store.transcriptPathFor(s.sessionId) ?? activity.transcriptPathFor(s.sessionId)),
+      ...(project ? { project } : {}),
+    };
+  });
+}
+
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { store, token, port } = deps;
   const bus = deps.bus ?? new EventBus();
   const activity = deps.activity ?? new ActivityTracker(bus);
+  const sessionMeta = deps.sessionMeta ?? new SessionMetaService(defaultSessionMetaOptions());
   const app = Fastify();
   const sseClients = new Set<ServerResponse>();
 
@@ -143,7 +170,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       req.raw.on('close', cleanup);
     });
 
-    api.get('/api/sessions', async () => store.listSessions());
+    api.get('/api/sessions', async () => listSessions(store, activity, sessionMeta));
 
     api.get('/api/activity', async () => activity.list());
 
