@@ -1,10 +1,11 @@
 node_modules/
 dist/
 
-# Local tool state (Claude Code worktrees, session notes, planning workspaces)
+# Local tool state (Claude Code worktrees, session notes, planning workspaces and their design docs)
 .claude/
 .remember/
 .superpowers/
+docs/superpowers/
 
 # Logs and OS files
 *.log

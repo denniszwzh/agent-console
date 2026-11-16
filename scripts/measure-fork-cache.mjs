@@ -189,7 +189,8 @@ function parseArgs(argv) {
 function makeScratchRepo(dir) {
   fs.mkdirSync(path.join(dir, 'docs'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'README.md'), '# Scratch\n\nA scratch repository for measuring fork cache reuse.\n');
-  fs.copyFileSync(path.join(repoRoot, 'docs/superpowers/specs/2026-11-15-agent-console-design.md'), path.join(dir, 'docs/spec.md'));
+  // A real document to ask about: the README covers the read-only forks and how conclusions get back.
+  fs.copyFileSync(path.join(repoRoot, 'README.md'), path.join(dir, 'docs/spec.md'));
   const git = (...a) => spawnSync('git', a, { cwd: dir, stdio: 'ignore' });
   git('init', '-q');
   git('add', '.');
