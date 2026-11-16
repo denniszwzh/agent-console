@@ -25,6 +25,7 @@ interface Entry {
   decoder: StringDecoder;
   lastChangeMs: number;
   lastEmitMs: number;
+  turnId?: string;
 }
 
 export interface StartInput {
@@ -33,6 +34,8 @@ export interface StartInput {
   cwd?: string;
   transcriptPath?: string;
   prompt?: string;
+  /** Codex turn id; lets a late Interrupt for an earlier turn leave the current one alone. */
+  turnId?: string;
 }
 
 /** True when a transcript line is the user-side record Claude Code writes when a turn is interrupted. */
@@ -115,14 +118,21 @@ export class ActivityTracker {
       decoder: new StringDecoder('utf8'),
       lastChangeMs: nowMs,
       lastEmitMs: nowMs,
+      turnId: input.turnId || undefined,
     });
     this.emit(input.sessionId);
     this.ensureTimer();
   }
 
-  /** Ends a session's turn; returns whether one was active. */
-  end(sessionId: string): boolean {
-    if (!this.entries.delete(sessionId)) return false;
+  /**
+   * Ends a session's turn; returns whether one was active. With `turnId`, only that turn is ended
+   * (an Interrupt that arrives after the next prompt must not clear the new turn).
+   */
+  end(sessionId: string, turnId?: string): boolean {
+    const e = this.entries.get(sessionId);
+    if (!e) return false;
+    if (turnId && e.turnId && turnId !== e.turnId) return false;
+    this.entries.delete(sessionId);
     this.emit(sessionId);
     if (this.entries.size === 0) this.stopTimer();
     return true;

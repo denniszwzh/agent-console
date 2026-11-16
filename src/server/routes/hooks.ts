@@ -96,6 +96,31 @@ export function registerHookRoutes(
 
   // Called by the UserPromptSubmit hook on every prompt: returns what to inject (or block), and,
   // unless the prompt is blocked, marks the session as working on a turn until its Stop arrives.
+  // Codex has no prompt injection; these two hooks only drive the "responding" status.
+  app.post('/api/hooks/codex/prompt', async (req, reply) => {
+    const body = (req.body ?? {}) as { session_id?: unknown; cwd?: unknown; transcript_path?: unknown; prompt?: unknown; turn_id?: unknown };
+    const sessionId = body.session_id;
+    if (!isSafeId(sessionId)) return reply.code(400).send({ error: 'invalid session_id' });
+    if (forks?.isForkSession(sessionId)) return { ignored: true };
+    activity?.start({
+      sessionId,
+      agent: 'codex',
+      cwd: typeof body.cwd === 'string' ? body.cwd : undefined,
+      transcriptPath: typeof body.transcript_path === 'string' ? body.transcript_path : undefined,
+      prompt: typeof body.prompt === 'string' ? body.prompt : undefined,
+      turnId: typeof body.turn_id === 'string' ? body.turn_id : undefined,
+    });
+    return { ok: true };
+  });
+
+  app.post('/api/hooks/codex/interrupt', async (req, reply) => {
+    const body = (req.body ?? {}) as { session_id?: unknown; turn_id?: unknown };
+    const sessionId = body.session_id;
+    if (!isSafeId(sessionId)) return reply.code(400).send({ error: 'invalid session_id' });
+    activity?.end(sessionId, typeof body.turn_id === 'string' ? body.turn_id : undefined);
+    return { ok: true };
+  });
+
   app.get('/api/hooks/claude/prompt', async (req, reply) => {
     const q = req.query as { session?: unknown; cwd?: unknown; transcript?: unknown; prompt?: unknown };
     const session = q.session;

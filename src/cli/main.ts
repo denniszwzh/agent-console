@@ -14,7 +14,8 @@ const USAGE = `Usage: agent-console [install | uninstall]
 
   (no command)  start the server and open the browser
   install       add the Stop / UserPromptSubmit hooks to ~/.claude/settings.json
-                and the Stop hook to ~/.codex/hooks.json (if ~/.codex exists)
+                and the Stop / UserPromptSubmit / Interrupt hooks to ~/.codex/hooks.json
+                (if ~/.codex exists)
   uninstall     remove the hooks added by install`;
 
 function readSettings(file: string): object {
@@ -87,12 +88,13 @@ export function hookCommands(): { Stop: string; UserPromptSubmit: string } {
   };
 }
 
-export function codexHookCommands(): { Stop: string } {
-  return { Stop: `node "${fileURLToPath(new URL('../hooks/codex-stop.js', import.meta.url))}"` };
+export function codexHookCommands(): { Stop: string; UserPromptSubmit: string; Interrupt: string } {
+  const p = (name: string) => `node "${fileURLToPath(new URL(`../hooks/${name}`, import.meta.url))}"`;
+  return { Stop: p('codex-stop.js'), UserPromptSubmit: p('codex-activity.js'), Interrupt: p('codex-activity.js') };
 }
 
 export const CODEX_TRUST_NOTICE =
-  'Codex skips hooks it has not been told to trust. Open the Codex TUI and run /hooks once to review and trust the Agent Console Stop hook; until then it will not fire.';
+  'Codex skips hooks it has not been told to trust. Open the Codex TUI and run /hooks once to review and trust the Agent Console hooks (Stop, UserPromptSubmit, Interrupt); until then they will not fire.';
 
 export interface InstallTargets {
   claudeSettings: string;

@@ -15,7 +15,7 @@ Everything runs locally: the server listens on `127.0.0.1` only, the UI is bundl
 
 - Windows 11 (primary target; macOS/Linux should work but are not tested)
 - Node.js 22
-- Claude Code (tested with 2.1.302) and/or Codex CLI (tested with 0.167.0) on `PATH`
+- Claude Code (tested with 2.1.302) and/or Codex CLI (tested with 0.167.0; the Codex `Interrupt` hook needs a version that has that event) on `PATH`
 - git (used for the post-run change check; optional, the check is skipped outside a git repo)
 
 ## Build
@@ -41,14 +41,15 @@ agent-console install
 ```
 
 - Claude: adds a `Stop` and a `UserPromptSubmit` hook to `~/.claude/settings.json`.
-- Codex: adds a `Stop` hook to `~/.codex/hooks.json` (`$CODEX_HOME` is honoured; skipped if the directory does not exist).
+- Codex: adds `Stop`, `UserPromptSubmit` and `Interrupt` hooks to `~/.codex/hooks.json` (`$CODEX_HOME` is honoured;
+  skipped if the directory does not exist). The last two only drive the "responding" status.
 
 Each file is shown as a before/after dump of its `hooks` section and only written after you confirm; a backup
 (`<file>.agent-console-backup-<timestamp>`) is made first.
 
 **Codex trust step:** Codex silently skips hooks it has not been told to trust. After installing, open the Codex
-TUI once and run `/hooks` to review and trust the Agent Console Stop hook. Until then Codex turns will not appear
-in the panel.
+TUI once and run `/hooks` to review and trust the Agent Console hooks (`Stop`, `UserPromptSubmit`, `Interrupt`).
+Until then Codex turns will not appear in the panel. Hooks added by a later `install` need the same trust step.
 
 ## Start
 
@@ -82,14 +83,15 @@ what). Forked sessions (`AGENT_CONSOLE_FORK=1`) are ignored by the hooks.
 
 ## "Responding" status
 
-When you send a prompt in a Claude session, the `UserPromptSubmit` hook tells the server. The sidebar marks the
+When you send a prompt in a Claude or Codex session, the `UserPromptSubmit` hook tells the server. The sidebar marks the
 session 「回應中」 (a session with no reply yet is listed too), and a banner above the reply shows the elapsed time and
 the start of the prompt. If the session transcript has not grown for 3 minutes, the banner says the turn may be
 waiting for a permission prompt or may have been interrupted. The `Stop` hook clears the status when the new reply
-arrives. Claude Code does not run `Stop` when you interrupt a turn, so the server also watches the lines appended to
-the transcript and clears the status on the interrupt record; a turn whose transcript stays unchanged for an hour is
-dropped. The state is in memory only (a restart forgets it). Codex sessions do not show it yet (only the `Stop` hook
-is installed for Codex).
+arrives. When you interrupt a turn, Codex runs its `Interrupt` hook, which clears the status. Claude Code has no such
+hook and does not run `Stop` on an interrupt, so for Claude the server watches the lines appended to the transcript
+and clears the status on the interrupt record. A turn whose transcript stays unchanged for an hour is dropped. The
+state is in memory only (a restart forgets it). The Codex hooks print nothing, so they add nothing to the model's
+context.
 
 ## How the conclusions get back
 
@@ -136,8 +138,9 @@ remove all data.
 - Answers stream per message, not per token.
 - Only the newest review unit of a session can take new questions; older ones become read-only history and their
   open threads are marked expired.
-- Codex: only `apply_patch` edits are detected as changed files (shell edits are not); a Codex turn without a rollout
-  path yields no files; file moves and deletions are shown as errors. `codex queue` into a running TUI is best effort.
+- Codex: only `apply_patch` edits are detected as changed files, also when Codex applies the patch from code mode
+  (read from the rollout's `FileChange` items). Files written by shell commands are not detected; add them with
+  「+ 加入檔案」. A Codex turn without a rollout path yields no files; deletions (and, in older rollouts without `FileChange` items, the source of a move) are shown as errors. `codex queue` into a running TUI is best effort.
 - Codex forks fail with a clear error if `codex mcp list` cannot be read or an MCP server name is not a plain
   `[A-Za-z0-9_-]` key (it could not be disabled).
 - Managed (policy) Claude settings outrank the fork's own settings; a managed `disableAllHooks` would turn the guard off.

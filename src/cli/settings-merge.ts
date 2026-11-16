@@ -1,17 +1,26 @@
 export class HooksShapeError extends Error {}
 
 type Json = Record<string, unknown>;
-type Group = { matcher?: string; hooks?: Array<{ type?: string; command?: string }> };
+type Group = { matcher?: string; hooks?: Array<{ type?: string; command?: string; timeout?: number }> };
 
 export interface HookCmds {
   Stop: string;
   UserPromptSubmit: string;
 }
 
-/** Codex (~/.codex/hooks.json) only gets the Stop hook; delivery goes through the copy button / queue. */
+/**
+ * Codex (~/.codex/hooks.json): Stop ingests the reply; UserPromptSubmit and Interrupt only drive the
+ * panel's "responding" status (conclusions go back through the copy button / queue, not a prompt hook).
+ */
 export interface CodexHookCmds {
   Stop: string;
+  UserPromptSubmit: string;
+  Interrupt: string;
 }
+
+const CODEX_EVENTS: Array<keyof CodexHookCmds> = ['Stop', 'UserPromptSubmit', 'Interrupt'];
+/** Codex runs Interrupt hooks with a 1 s default timeout (configurable up to 3 s); node needs the headroom. */
+const CODEX_TIMEOUTS: Partial<Record<keyof CodexHookCmds, number>> = { Interrupt: 3 };
 
 const EVENTS: Array<keyof HookCmds> = ['Stop', 'UserPromptSubmit'];
 
@@ -19,7 +28,7 @@ const EVENTS: Array<keyof HookCmds> = ['Stop', 'UserPromptSubmit'];
 function isOurs(command: unknown): boolean {
   if (typeof command !== 'string') return false;
   const c = command.toLowerCase();
-  return c.includes('agent-console') && (c.includes('claude-stop.js') || c.includes('claude-prompt.js') || c.includes('codex-stop.js'));
+  return c.includes('agent-console') && (c.includes('claude-stop.js') || c.includes('claude-prompt.js') || c.includes('codex-stop.js') || c.includes('codex-activity.js'));
 }
 
 function clone<T>(v: T): T {
@@ -80,17 +89,23 @@ export function addHooks(settings: object, hookCmds: HookCmds): object {
 
 /** hooks.json has the same hooks structure as Claude's settings.json. */
 export function addCodexHooks(settings: object, hookCmds: CodexHookCmds): object {
-  return addEvents(settings, hookCmds, ['Stop']);
+  return addEvents(settings, hookCmds, CODEX_EVENTS, CODEX_TIMEOUTS);
 }
 
-function addEvents<K extends string>(settings: object, hookCmds: Record<K, string>, events: K[]): object {
+function addEvents<K extends string>(
+  settings: object,
+  hookCmds: Record<K, string>,
+  events: K[],
+  timeouts: Partial<Record<K, number>> = {},
+): object {
   assertHooksShape(settings);
   // Strip first so repeated calls (and stale paths) never duplicate our entries.
   const out = removeHooks(settings) as Json;
   const hooks = (out.hooks && typeof out.hooks === 'object' ? out.hooks : {}) as Json;
   for (const event of events) {
     const groups = Array.isArray(hooks[event]) ? (hooks[event] as Group[]) : [];
-    groups.push({ hooks: [{ type: 'command', command: hookCmds[event] }] });
+    const timeout = timeouts[event];
+    groups.push({ hooks: [{ type: 'command', command: hookCmds[event], ...(timeout ? { timeout } : {}) }] });
     hooks[event] = groups;
   }
   out.hooks = hooks;

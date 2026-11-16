@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CODEX_TRUST_NOTICE, codexHookCommands, runInstall, runUninstall } from '../../src/cli/main.js';
 import { addCodexHooks, assertRecognisable, removeHooks } from '../../src/cli/settings-merge.js';
 
-const cmd = { Stop: 'node "C:\\x\\agent-console\\dist\\hooks\\codex-stop.js"' };
+const cmd = {
+  Stop: 'node "C:\\x\\agent-console\\dist\\hooks\\codex-stop.js"',
+  UserPromptSubmit: 'node "C:\\x\\agent-console\\dist\\hooks\\codex-activity.js"',
+  Interrupt: 'node "C:\\x\\agent-console\\dist\\hooks\\codex-activity.js"',
+};
 let dir: string;
 let claude: string;
 let codexDir: string;
@@ -21,12 +25,22 @@ afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 describe('codex hooks.json merge', () => {
   const other = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node other.js' }] }], PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node p.js' }] }] } };
 
-  it('adds only a Stop hook and keeps everything else', () => {
-    const out = addCodexHooks(other, cmd) as typeof other;
-    expect(Object.keys(out.hooks).sort()).toEqual(['PreToolUse', 'Stop']);
+  it('adds Stop, UserPromptSubmit and Interrupt (with a 3 s timeout) and keeps everything else', () => {
+    const out = addCodexHooks(other, cmd) as { hooks: Record<string, unknown[]> };
+    expect(Object.keys(out.hooks).sort()).toEqual(['Interrupt', 'PreToolUse', 'Stop', 'UserPromptSubmit']);
     expect(out.hooks.Stop).toHaveLength(2);
     expect(out.hooks.Stop[1]).toEqual({ hooks: [{ type: 'command', command: cmd.Stop }] });
+    expect(out.hooks.UserPromptSubmit).toEqual([{ hooks: [{ type: 'command', command: cmd.UserPromptSubmit }] }]);
+    expect(out.hooks.Interrupt).toEqual([{ hooks: [{ type: 'command', command: cmd.Interrupt, timeout: 3 }] }]);
     expect(out.hooks.PreToolUse).toEqual(other.hooks.PreToolUse);
+  });
+
+  it('upgrades a Stop-only install without duplicating the Stop hook', () => {
+    const stopOnly = { hooks: { Stop: [{ hooks: [{ type: 'command', command: cmd.Stop }] }] } };
+    const out = addCodexHooks(stopOnly, cmd) as { hooks: Record<string, unknown[]> };
+    expect(out.hooks.Stop).toEqual(stopOnly.hooks.Stop);
+    expect(out.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(out.hooks.Interrupt).toHaveLength(1);
   });
 
   it('is idempotent and removeHooks restores the original', () => {
@@ -44,6 +58,8 @@ describe('codex hooks.json merge', () => {
   it('builds a recognisable command from the real script path', () => {
     expect(() => assertRecognisable(codexHookCommands())).not.toThrow();
     expect(codexHookCommands().Stop).toMatch(/hooks[\\/]codex-stop\.js/);
+    expect(codexHookCommands().UserPromptSubmit).toMatch(/hooks[\\/]codex-activity\.js/);
+    expect(codexHookCommands().Interrupt).toBe(codexHookCommands().UserPromptSubmit);
   });
 });
 
@@ -68,7 +84,7 @@ describe('runInstall / runUninstall (temp dirs only)', () => {
     expect(questions).toHaveLength(2); // Claude, then Codex
     const written = JSON.parse(fs.readFileSync(hooksFile, 'utf8'));
     expect(written).toEqual(addCodexHooks(orig, codexHookCommands()));
-    expect(written.hooks.UserPromptSubmit).toBeUndefined();
+    expect(written.hooks.UserPromptSubmit[0].hooks[0].command).toContain('codex-activity.js');
     const backups = fs.readdirSync(codexDir).filter((f) => f.startsWith('hooks.json.agent-console-backup-'));
     expect(backups).toHaveLength(1);
     expect(JSON.parse(fs.readFileSync(path.join(codexDir, backups[0]), 'utf8'))).toEqual(orig);

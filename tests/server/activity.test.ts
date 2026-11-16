@@ -257,6 +257,78 @@ describe('activity routes', () => {
     await app.close();
   });
 
+  it('Codex: a prompt starts a turn, an interrupt or the Stop ends it', async () => {
+    const { app } = setup();
+    const prompt = () =>
+      app.inject({
+        method: 'POST',
+        url: '/api/hooks/codex/prompt',
+        headers,
+        payload: { session_id: 'thr_1', cwd: work, transcript_path: join(work, 'rollout.jsonl'), prompt: 'refactor the parser' },
+      });
+    expect((await prompt()).json()).toEqual({ ok: true });
+    expect(await activity(app)).toMatchObject([{ sessionId: 'thr_1', agent: 'codex', cwd: work, prompt: 'refactor the parser' }]);
+
+    expect((await app.inject({ method: 'POST', url: '/api/hooks/codex/interrupt', headers, payload: { session_id: 'thr_1' } })).statusCode).toBe(200);
+    expect(await activity(app)).toEqual([]);
+
+    await prompt();
+    await app.inject({
+      method: 'POST',
+      url: '/api/hooks/codex/stop',
+      headers,
+      payload: { session_id: 'thr_1', cwd: work, last_assistant_message: 'done' },
+    });
+    expect(await activity(app)).toEqual([]);
+    await app.close();
+  });
+
+  it('Codex: a late Interrupt for an earlier turn leaves the current turn alone', async () => {
+    const { app } = setup();
+    const prompt = (turn_id: string) =>
+      app.inject({ method: 'POST', url: '/api/hooks/codex/prompt', headers, payload: { session_id: 'thr_1', turn_id } });
+    const interrupt = (turn_id?: string) =>
+      app.inject({ method: 'POST', url: '/api/hooks/codex/interrupt', headers, payload: { session_id: 'thr_1', turn_id } });
+    await prompt('turn-1');
+    await prompt('turn-2');
+    await interrupt('turn-1');
+    expect(await activity(app)).toHaveLength(1);
+    await interrupt('turn-2');
+    expect(await activity(app)).toEqual([]);
+    // Without a turn id the interrupt still ends the turn.
+    await prompt('turn-3');
+    await interrupt();
+    expect(await activity(app)).toEqual([]);
+    await app.close();
+  });
+
+  it('Codex: a prompt from a session the console forked itself is ignored', async () => {
+    const store = new UnitStore();
+    const app = buildApp({
+      store,
+      token: TOKEN,
+      port: PORT,
+      bus: new EventBus(),
+      config: { port: PORT, concurrency: 1, hardGate: false, runTimeoutMs: 1000 },
+      forks: { isForkSession: (id) => id === 'fork_1' },
+    });
+    const res = await app.inject({ method: 'POST', url: '/api/hooks/codex/prompt', headers, payload: { session_id: 'fork_1' } });
+    expect(res.json()).toEqual({ ignored: true });
+    expect(await activity(app)).toEqual([]);
+    await app.close();
+  });
+
+  it('Codex routes validate the session id', async () => {
+    const { app } = setup();
+    for (const url of ['/api/hooks/codex/prompt', '/api/hooks/codex/interrupt']) {
+      for (const session_id of [undefined, 5, '-flag', '../x']) {
+        expect((await app.inject({ method: 'POST', url, headers, payload: { session_id } })).statusCode).toBe(400);
+      }
+    }
+    expect(await activity(app)).toEqual([]);
+    await app.close();
+  });
+
   it('requires the token', async () => {
     const { app } = setup();
     const res = await app.inject({ method: 'GET', url: '/api/activity', headers: { host: headers.host } });
