@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReviewUnit } from '../shared/types.js';
-import { ApiError, api, subscribeEvents, type SessionSummary } from './api.js';
+import { ApiError, api, subscribeEvents, type SessionActivity, type SessionSummary } from './api.js';
+import { RespondingBanner } from './components/Responding.js';
 import { Sidebar } from './components/Sidebar.js';
 import { UnitView } from './components/UnitView.js';
 import { useSidebarLayout } from './layout.js';
@@ -17,6 +18,7 @@ const REFRESH_DELAY_MS = 150;
 export function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [units, setUnits] = useState<Record<string, ReviewUnit[] | undefined>>({});
+  const [activity, setActivity] = useState<SessionActivity[]>([]);
   const [sel, setSel] = useState<Selection>({ session: null, unit: null });
   const [error, setError] = useState<string | null>(null);
   const [unauthorized, setUnauthorized] = useState(false);
@@ -46,16 +48,17 @@ export function App() {
   );
 
   const loadSessions = useCallback(() => latest('sessions', api.sessions, setSessions), [latest]);
+  const loadActivity = useCallback(() => latest('activity', api.activity, setActivity), [latest]);
 
   const loadAll = useCallback(async () => {
     try {
-      const list = await loadSessions();
+      const [list] = await Promise.all([loadSessions(), loadActivity()]);
       await Promise.all(list.map((s) => loadUnits(s.sessionId)));
       setLoaded(true);
     } catch (e) {
       reportError(e);
     }
-  }, [loadSessions, loadUnits, reportError]);
+  }, [loadSessions, loadActivity, loadUnits, reportError]);
 
   useEffect(() => {
     void loadAll();
@@ -73,6 +76,10 @@ export function App() {
     let connectedBefore = false;
     const unsubscribe = subscribeEvents(
       (e) => {
+        if (e.type === 'activity.updated') {
+          schedule('activity', loadActivity);
+          return;
+        }
         schedule('sessions', loadSessions);
         schedule(`units:${e.sessionId}`, () => loadUnits(e.sessionId));
         // Follow a new reply in the session being viewed.
@@ -90,7 +97,7 @@ export function App() {
       unsubscribe();
       timers.forEach(clearTimeout);
     };
-  }, [loadAll, loadSessions, loadUnits, reportError]);
+  }, [loadAll, loadSessions, loadActivity, loadUnits, reportError]);
 
   // Default to the most recent session and its latest unit.
   useEffect(() => {
@@ -99,6 +106,17 @@ export function App() {
     const list = units[first.sessionId];
     if (list) setSel({ session: first.sessionId, unit: list[list.length - 1]?.id ?? null });
   }, [sessions, units, sel.session]);
+
+  // A session that is responding before its first reply has no units yet: list it too, on top.
+  const sidebarSessions = useMemo(() => {
+    const known = new Set(sessions.map((s) => s.sessionId));
+    const fresh: SessionSummary[] = activity
+      .filter((a) => !known.has(a.sessionId))
+      .map((a) => ({ sessionId: a.sessionId, agent: a.agent, cwd: a.cwd, lastActivity: a.since }));
+    return fresh.length ? [...fresh, ...sessions] : sessions;
+  }, [sessions, activity]);
+  const respondingIds = useMemo(() => new Set(activity.map((a) => a.sessionId)), [activity]);
+  const selectedActivity = sel.session ? activity.find((a) => a.sessionId === sel.session) : undefined;
 
   const shown = sel.session && sel.unit ? (units[sel.session]?.find((u) => u.id === sel.unit) ?? null) : null;
   const shownId = shown?.id;
@@ -148,7 +166,8 @@ export function App() {
     <div className={`app ${layout.compact ? 'layout-compact' : 'layout-wide'}${layout.open ? ' sidebar-open' : ''}`}>
       {layout.open && (
         <Sidebar
-          sessions={sessions}
+          sessions={sidebarSessions}
+          responding={respondingIds}
           unitsBySession={units}
           selectedSession={sel.session}
           selectedUnit={sel.unit}
@@ -172,11 +191,14 @@ export function App() {
           </div>
         )}
         {shown && actions ? (
-          <UnitView key={shown.id} unit={shown} actions={actions} navToggle={navToggle} />
+          <UnitView key={shown.id} unit={shown} actions={actions} navToggle={navToggle} responding={selectedActivity} />
         ) : (
           <>
             {navToggle && <div className="tabs">{navToggle}</div>}
-            <div className="placeholder">{loaded ? '選擇側欄中的一則回覆開始審查。' : '載入中…'}</div>
+            {selectedActivity && <RespondingBanner activity={selectedActivity} />}
+            <div className="placeholder">
+              {!loaded ? '載入中…' : selectedActivity ? '這個對話還沒有回覆。' : '選擇側欄中的一則回覆開始審查。'}
+            </div>
           </>
         )}
       </div>

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { ReviewUnit } from '../../shared/types.js';
+import type { ReviewUnit, SessionActivity } from '../../shared/types.js';
 import { UNIT_STATUS_LABELS, formatTime } from '../labels.js';
 import { UnitProvider, useUnit, type UnitActions } from '../unit-context.js';
 import { ConclusionBar } from './ConclusionBar.js';
+import { RespondingBanner } from './Responding.js';
 import { SourceTabs } from './SourceTabs.js';
 import { SourceView } from './SourceView.js';
 
@@ -29,7 +30,7 @@ function Banners() {
   );
 }
 
-function UnitBody({ navToggle }: { navToggle?: ReactNode }) {
+function UnitBody({ navToggle, responding }: { navToggle?: ReactNode; responding?: SessionActivity }) {
   const { unit } = useUnit();
   const [activeId, setActiveId] = useState(unit.reply.id);
   const awaitingNewFile = useRef<number | null>(null);
@@ -53,6 +54,7 @@ function UnitBody({ navToggle }: { navToggle?: ReactNode }) {
         <span className="unit-time">{formatTime(unit.createdAt)}</span>
         <span className={`unit-status unit-status-${unit.status}`}>{UNIT_STATUS_LABELS[unit.status]}</span>
       </header>
+      {responding && <RespondingBanner activity={responding} unitOpen={unit.status === 'open'} />}
       <Banners />
       <SourceTabs
         activeId={active.id}
@@ -70,10 +72,21 @@ function UnitBody({ navToggle }: { navToggle?: ReactNode }) {
   );
 }
 
-export function UnitView({ unit, actions, navToggle }: { unit: ReviewUnit; actions: UnitActions; navToggle?: ReactNode }) {
+export function UnitView({
+  unit,
+  actions,
+  navToggle,
+  responding,
+}: {
+  unit: ReviewUnit;
+  actions: UnitActions;
+  navToggle?: ReactNode;
+  /** Set while the unit's main session is working on a new turn. */
+  responding?: SessionActivity;
+}) {
   return (
     <UnitProvider unit={unit} actions={actions}>
-      <UnitBody navToggle={navToggle} />
+      <UnitBody navToggle={navToggle} responding={responding} />
     </UnitProvider>
   );
 }

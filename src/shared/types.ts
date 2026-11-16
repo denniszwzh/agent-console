@@ -94,9 +94,21 @@ export interface SessionSummary {
   lastActivity: string;
 }
 
-/** Notification pushed over SSE (GET /api/events); clients refetch on receipt. */
-export interface ServerEvent {
-  type: 'unit.created' | 'unit.updated';
-  unitId: string;
+/** A main session that is working on a turn right now (GET /api/activity). */
+export interface SessionActivity {
   sessionId: string;
+  agent: AgentKind;
+  /** Working directory reported by the prompt hook ('' if unknown). */
+  cwd: string;
+  /** When the user sent the prompt (ISO time). */
+  since: string;
+  /** Last time the session's transcript grew (ISO time); equals `since` until it does. */
+  lastChange: string;
+  /** First line of the prompt, shortened. */
+  prompt?: string;
 }
+
+/** Notification pushed over SSE (GET /api/events); clients refetch on receipt. */
+export type ServerEvent =
+  | { type: 'unit.created' | 'unit.updated'; unitId: string; sessionId: string }
+  | { type: 'activity.updated'; sessionId: string };

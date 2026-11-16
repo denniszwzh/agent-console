@@ -98,7 +98,7 @@ describe('runPromptHook two-phase delivery (R-F1)', () => {
     };
     await runPromptHook('{"session_id":"sess 1"}', call, write);
     expect(order).toEqual(['GET /api/hooks/claude/prompt', 'write BUNDLE', 'POST /api/hooks/claude/prompt/ack']);
-    expect(calls[0][1]).toBe('/api/hooks/claude/prompt?session=sess%201');
+    expect(calls[0][1]).toBe('/api/hooks/claude/prompt?session=sess+1');
     expect(calls[1][2]).toEqual({ unitId: 'u1' });
   });
 

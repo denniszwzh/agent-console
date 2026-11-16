@@ -1,6 +1,6 @@
-import type { Anchor, ReviewUnit, ServerEvent, SessionSummary, Source, Thread } from '../shared/types.js';
+import type { Anchor, ReviewUnit, ServerEvent, SessionActivity, SessionSummary, Source, Thread } from '../shared/types.js';
 
-export type { ServerEvent, SessionSummary };
+export type { ServerEvent, SessionActivity, SessionSummary };
 
 
 export class ApiError extends Error {
@@ -38,6 +38,7 @@ const enc = encodeURIComponent;
 
 export const api = {
   sessions: () => request<SessionSummary[]>('GET', '/api/sessions'),
+  activity: () => request<SessionActivity[]>('GET', '/api/activity'),
   units: (sessionId: string) => request<ReviewUnit[]>('GET', `/api/units?session=${enc(sessionId)}`),
   addThread: (unitId: string, anchor: Anchor, question: string, parentThreadId?: string) =>
     request<Thread>('POST', `/api/units/${enc(unitId)}/threads`, { anchor, question, parentThreadId }),

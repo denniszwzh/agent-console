@@ -1085,3 +1085,59 @@ textarea {
 .layout-compact .conclusion-bar {
   padding: 0.5rem 0.75rem;
 }
+
+/* Main session working on a turn (prompt hook → Stop hook). */
+.banner-responding {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  background: var(--accent-faint);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.banner-responding .responding-dot {
+  margin-top: 0.4rem;
+}
+.responding-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.6rem;
+  min-width: 0;
+}
+.responding-text .hint {
+  flex-basis: 100%;
+}
+.responding-elapsed {
+  font-variant-numeric: tabular-nums;
+}
+.responding-prompt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+.responding-dot {
+  flex: none;
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.responding-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  background: var(--accent-faint);
+  color: var(--accent);
+  font-size: 0.75rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .responding-dot {
+    animation: none;
+  }
+}

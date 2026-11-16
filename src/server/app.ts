@@ -7,6 +7,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import type { UnitStore } from './store.js';
 import { EventBus } from './events.js';
+import { ActivityTracker } from './activity.js';
 import { createCodexQueueRunner, type CodexQueueRunner } from '../agents/codex.js';
 import { registerHookRoutes } from './routes/hooks.js';
 import { registerUnitRoutes } from './routes/units.js';
@@ -27,6 +28,8 @@ export interface AppDeps {
   port: number;
   forks?: ForkRegistry;
   bus?: EventBus;
+  /** "Main session is working on a turn" state; defaults to a fresh tracker on the bus. */
+  activity?: ActivityTracker;
   engine?: ThreadEngine;
   config?: Config;
   /** Sends a message to a Codex thread queue on submit; defaults to the real `codex queue`. */
@@ -78,6 +81,7 @@ function readCookie(header: string | undefined, name: string): string | null {
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { store, token, port } = deps;
   const bus = deps.bus ?? new EventBus();
+  const activity = deps.activity ?? new ActivityTracker(bus);
   const app = Fastify();
   const sseClients = new Set<ServerResponse>();
 
@@ -139,6 +143,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
     api.get('/api/sessions', async () => store.listSessions());
 
+    api.get('/api/activity', async () => activity.list());
+
     api.get('/api/units', async (req, reply) => {
       const session = (req.query as { session?: unknown }).session;
       if (typeof session !== 'string' || !session) return reply.code(400).send({ error: 'session query required' });
@@ -157,7 +163,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
     });
 
-    registerHookRoutes(api, { store, bus, config: deps.config ?? readConfig(), forks: deps.forks ?? deps.engine });
+    registerHookRoutes(api, { store, bus, config: deps.config ?? readConfig(), forks: deps.forks ?? deps.engine, activity });
     if (deps.engine) registerUnitRoutes(api, { engine: deps.engine, store, bus, codexQueue: deps.codexQueue ?? createCodexQueueRunner() });
   });
 
@@ -175,6 +181,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   }
 
   app.addHook('onClose', async () => {
+    activity.close();
     for (const s of sseClients) s.destroy();
   });
   return app;

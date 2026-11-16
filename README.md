@@ -80,6 +80,17 @@ The hooks never break the CLI. If the server is not running they exit silently. 
 about 3 seconds (stdin read up to 1.5 s, each server call times out after 2 s, the process exits at 3 s no matter
 what). Forked sessions (`AGENT_CONSOLE_FORK=1`) are ignored by the hooks.
 
+## "Responding" status
+
+When you send a prompt in a Claude session, the `UserPromptSubmit` hook tells the server. The sidebar marks the
+session 「回應中」 (a session with no reply yet is listed too), and a banner above the reply shows the elapsed time and
+the start of the prompt. If the session transcript has not grown for 3 minutes, the banner says the turn may be
+waiting for a permission prompt or may have been interrupted. The `Stop` hook clears the status when the new reply
+arrives. Claude Code does not run `Stop` when you interrupt a turn, so the server also watches the lines appended to
+the transcript and clears the status on the interrupt record; a turn whose transcript stays unchanged for an hour is
+dropped. The state is in memory only (a restart forgets it). Codex sessions do not show it yet (only the `Stop` hook
+is installed for Codex).
+
 ## How the conclusions get back
 
 **Claude.** After you submit, send any next message in the terminal (for example "apply the review

@@ -11,6 +11,7 @@ import type { UnitStore } from '../store.js';
 import type { ForkRegistry } from '../app.js';
 import { buildConclusionBundle } from '../conclusion.js';
 import { conclusionFile } from '../paths.js';
+import type { ActivityTracker } from '../activity.js';
 
 interface StopBody {
   session_id?: unknown;
@@ -21,9 +22,9 @@ interface StopBody {
 
 export function registerHookRoutes(
   app: FastifyInstance,
-  deps: { store: UnitStore; bus: EventBus; config: Config; forks?: ForkRegistry },
+  deps: { store: UnitStore; bus: EventBus; config: Config; forks?: ForkRegistry; activity?: ActivityTracker },
 ): void {
-  const { store, bus, config, forks } = deps;
+  const { store, bus, config, forks, activity } = deps;
 
   /** Shared Stop ingestion: validates the body, snapshots changed files, stales earlier open units. */
   const ingestStop = (
@@ -75,6 +76,7 @@ export function registerHookRoutes(
       staled.push(prev);
     }
     store.save(unit);
+    activity?.end(sessionId);
 
     for (const prev of staled) {
       forks?.abortUnitRuns?.(prev.id);
@@ -92,9 +94,22 @@ export function registerHookRoutes(
     ingestStop('codex', (rollout) => findChangedFilesCodex(rollout), (req.body ?? {}) as StopBody, reply),
   );
 
+  // Called by the UserPromptSubmit hook on every prompt: returns what to inject (or block), and,
+  // unless the prompt is blocked, marks the session as working on a turn until its Stop arrives.
   app.get('/api/hooks/claude/prompt', async (req, reply) => {
-    const session = (req.query as { session?: unknown }).session;
+    const q = req.query as { session?: unknown; cwd?: unknown; transcript?: unknown; prompt?: unknown };
+    const session = q.session;
     if (typeof session !== 'string' || !session) return reply.code(400).send({ error: 'session query required' });
+    const startTurn = () => {
+      if (!activity || !isSafeId(session) || forks?.isForkSession(session)) return;
+      activity.start({
+        sessionId: session,
+        agent: 'claude',
+        cwd: typeof q.cwd === 'string' ? q.cwd : undefined,
+        transcriptPath: typeof q.transcript === 'string' ? q.transcript : undefined,
+        prompt: typeof q.prompt === 'string' ? q.prompt : undefined,
+      });
+    };
 
     const units = store.listBySession(session);
     const pending = units
@@ -104,6 +119,7 @@ export function registerHookRoutes(
       // Two-phase delivery: only the hook's ack (after it wrote the text) marks the unit delivered,
       // so a hook killed mid-way re-injects next time instead of losing the conclusions.
       const text = `Conclusions file: ${conclusionFile(pending.id)}\n\n${buildConclusionBundle(pending)}`;
+      startTurn();
       return { action: 'inject', text, unitId: pending.id };
     }
 
@@ -119,6 +135,7 @@ export function registerHookRoutes(
         };
       }
     }
+    startTurn();
     return { action: 'none' };
   });
 

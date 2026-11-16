@@ -5,6 +5,8 @@ import { isOpenThread } from '../unit-context.js';
 
 interface Props {
   sessions: SessionSummary[];
+  /** Session ids whose main session is working on a turn right now. */
+  responding?: ReadonlySet<string>;
   unitsBySession: Record<string, ReviewUnit[] | undefined>;
   selectedSession: string | null;
   selectedUnit: string | null;
@@ -22,7 +24,7 @@ function openThreadCount(units: ReviewUnit[] | undefined): number {
     .reduce((n, u) => n + u.threads.filter(isOpenThread).length, 0);
 }
 
-export function Sidebar({ sessions, unitsBySession, selectedSession, selectedUnit, onSelect, onHide, drawer }: Props) {
+export function Sidebar({ sessions, responding, unitsBySession, selectedSession, selectedUnit, onSelect, onHide, drawer }: Props) {
   return (
     <aside className={`sidebar${drawer ? ' sidebar-drawer' : ''}`}>
       <div className="sidebar-title">
@@ -57,6 +59,12 @@ export function Sidebar({ sessions, unitsBySession, selectedSession, selectedUni
                     {s.agent} · {formatTime(s.lastActivity)}
                   </span>
                 </span>
+                {responding?.has(s.sessionId) && (
+                  <span className="responding-badge" title="主對話正在回應">
+                    <span className="responding-dot" aria-hidden="true" />
+                    回應中
+                  </span>
+                )}
                 {open > 0 && (
                   <span className="open-count" title={`${open} 個未結束問題串`}>
                     {open} 未結
