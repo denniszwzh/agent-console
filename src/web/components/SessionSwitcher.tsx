@@ -6,7 +6,8 @@ import { formatElapsed, useNow } from './Responding.js';
 
 /**
  * Hold-to-show switcher state: Alt+S opens it, and it stays open while Alt is held.
- * Releasing Alt, Escape, or the window losing focus (e.g. Alt+Tab away) closes it.
+ * Releasing Alt, Escape, or the window losing focus (e.g. Alt+Tab away) closes it. So does any later
+ * key or mouse event that shows Alt is no longer held, in case the Alt release itself was missed.
  */
 export function useHoldSwitcher(): { open: boolean; close(): void } {
   const [open, setOpen] = useState(false);
@@ -24,20 +25,29 @@ export function useHoldSwitcher(): { open: boolean; close(): void } {
       } else if (e.altKey && e.code === 'KeyS' && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         set(true);
+      } else if (openRef.current && !e.altKey) {
+        set(false);
       }
     };
     const onUp = (e: KeyboardEvent) => {
-      if (e.key !== 'Alt' || !openRef.current) return;
+      if (!openRef.current || (e.key !== 'Alt' && e.altKey)) return;
       // Keeps Windows browsers from moving focus to their menu on the Alt release.
-      e.preventDefault();
+      if (e.key === 'Alt') e.preventDefault();
       set(false);
+    };
+    const onMouse = (e: MouseEvent) => {
+      if (openRef.current && !e.altKey) set(false);
     };
     const onBlur = () => set(false);
     // Capture phase: a focused text box must not swallow the shortcut.
     window.addEventListener('keydown', onDown, true);
     window.addEventListener('keyup', onUp, true);
     window.addEventListener('blur', onBlur);
+    window.addEventListener('mousemove', onMouse, true);
+    window.addEventListener('mousedown', onMouse, true);
     return () => {
+      window.removeEventListener('mousemove', onMouse, true);
+      window.removeEventListener('mousedown', onMouse, true);
       window.removeEventListener('keydown', onDown, true);
       window.removeEventListener('keyup', onUp, true);
       window.removeEventListener('blur', onBlur);

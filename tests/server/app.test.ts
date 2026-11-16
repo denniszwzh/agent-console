@@ -217,28 +217,36 @@ describe('GET /api/sessions with transcript meta', () => {
     const bus = new EventBus();
     const activity = new ActivityTracker(bus);
     try {
-      activity.start({ sessionId: 's9', agent: 'codex', cwd: 'C:\w' });
+      activity.start({ sessionId: 's9', agent: 'codex', cwd: 'C:/w' });
       const { svc, calls } = fakeMeta({});
       const res = await buildApp({ store: new UnitStore(), token: TOKEN, port: PORT, bus, activity, sessionMeta: svc }).inject({
         method: 'GET',
         url: '/api/sessions',
         headers,
       });
-      expect(res.json()).toEqual([{ sessionId: 's9', agent: 'codex', cwd: 'C:\w', lastActivity: activity.list()[0].since }]);
+      expect(res.json()).toEqual([{ sessionId: 's9', agent: 'codex', cwd: 'C:/w', lastActivity: activity.list()[0].since }]);
       expect(calls).toEqual([['codex', 's9', undefined]]);
     } finally {
       activity.close();
     }
   });
 
-  it('orders sessions by last change, newest first', async () => {
-    const store = new UnitStore();
-    store.save(unit('u1', 'old-reply', '2026-11-16T01:00:00.000Z'));
-    store.save(unit('u2', 'new-reply', '2026-11-16T02:00:00.000Z'));
-    const svc = {
-      describe: (_a: string, id: string) => (id === 'old-reply' ? { lastModified: '2026-11-16T03:00:00.000Z' } : {}),
-    } as unknown as SessionMetaService;
-    const res = await buildApp({ store, token: TOKEN, port: PORT, sessionMeta: svc }).inject({ method: 'GET', url: '/api/sessions', headers });
-    expect(res.json().map((s: { sessionId: string }) => s.sessionId)).toEqual(['old-reply', 'new-reply']);
+  it('keeps reply order, with responding sessions that have no reply on top', async () => {
+    const bus = new EventBus();
+    const activity = new ActivityTracker(bus);
+    try {
+      const store = new UnitStore();
+      store.save(unit('u1', 'old-reply', '2026-11-16T01:00:00.000Z'));
+      store.save(unit('u2', 'new-reply', '2026-11-16T02:00:00.000Z'));
+      activity.start({ sessionId: 'fresh', agent: 'claude', cwd: 'C:/w' });
+      // A later transcript change must not move a session up: the sidebar would reshuffle under the pointer.
+      const svc = {
+        describe: (_a: string, id: string) => (id === 'old-reply' ? { lastModified: '2026-11-16T03:00:00.000Z' } : {}),
+      } as unknown as SessionMetaService;
+      const res = await buildApp({ store, token: TOKEN, port: PORT, bus, activity, sessionMeta: svc }).inject({ method: 'GET', url: '/api/sessions', headers });
+      expect(res.json().map((s: { sessionId: string }) => s.sessionId)).toEqual(['fresh', 'new-reply', 'old-reply']);
+    } finally {
+      activity.close();
+    }
   });
 });

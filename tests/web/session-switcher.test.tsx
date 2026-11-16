@@ -60,6 +60,29 @@ describe('useHoldSwitcher', () => {
     expect(result.current.open).toBe(false);
   });
 
+  it('closes when a later event shows Alt is no longer held', () => {
+    const { result } = renderHook(() => useHoldSwitcher());
+    const open = () =>
+      act(() => {
+        fireEvent.keyDown(window, { key: 's', code: 'KeyS', altKey: true });
+      });
+    open();
+    act(() => {
+      fireEvent.mouseMove(window, { altKey: true });
+      fireEvent.keyUp(window, { key: 's', code: 'KeyS', altKey: true });
+    });
+    expect(result.current.open).toBe(true);
+    act(() => {
+      fireEvent.mouseMove(window, { altKey: false });
+    });
+    expect(result.current.open).toBe(false);
+    open();
+    act(() => {
+      fireEvent.keyDown(window, { key: 'x', code: 'KeyX' });
+    });
+    expect(result.current.open).toBe(false);
+  });
+
   it('closes through close()', () => {
     const { result } = renderHook(() => useHoldSwitcher());
     act(() => {

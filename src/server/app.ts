@@ -84,21 +84,21 @@ function readCookie(header: string | undefined, name: string): string | null {
 }
 
 /**
- * Sessions with replies plus sessions responding before their first reply, each with its name and
- * times from the agent's transcript, newest change first.
+ * Sessions responding before their first reply, then sessions with replies (newest reply first), each
+ * with its name and times from the agent's transcript. The order ignores transcript changes on purpose:
+ * the sidebar would otherwise reshuffle while sessions respond. The quick switcher sorts on its own.
  */
 function listSessions(store: UnitStore, activity: ActivityTracker, meta: SessionMetaService): SessionSummary[] {
-  const list = store.listSessions();
-  const known = new Set(list.map((s) => s.sessionId));
-  for (const a of activity.list()) {
-    if (!known.has(a.sessionId)) list.push({ sessionId: a.sessionId, agent: a.agent, cwd: a.cwd, lastActivity: a.since });
-  }
-  const out = list.map((s) => ({
+  const replied = store.listSessions();
+  const known = new Set(replied.map((s) => s.sessionId));
+  const fresh: SessionSummary[] = activity
+    .list()
+    .filter((a) => !known.has(a.sessionId))
+    .map((a) => ({ sessionId: a.sessionId, agent: a.agent, cwd: a.cwd, lastActivity: a.since }));
+  return [...fresh, ...replied].map((s) => ({
     ...s,
     ...meta.describe(s.agent, s.sessionId, store.transcriptPathFor(s.sessionId) ?? activity.transcriptPathFor(s.sessionId)),
   }));
-  const changed = (s: SessionSummary) => s.lastModified ?? s.lastActivity;
-  return out.sort((a, b) => changed(b).localeCompare(changed(a)));
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {

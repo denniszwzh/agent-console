@@ -9,8 +9,16 @@ import { acceptableTranscriptPath } from './activity.js';
 const HEAD_BYTES = 256 * 1024;
 /** Bytes read from the end of a transcript (titles are appended there); also the cap per later read. */
 const TAIL_BYTES = 4 * 1024 * 1024;
-/** A session whose transcript was not found is not searched for again within this time. */
-const MISS_TTL_MS = 60_000;
+/**
+ * The transcript folders are indexed by one directory walk, shared by every lookup. A session missing
+ * from the index (often an old one whose transcript the agent has deleted) triggers a new walk only
+ * once the index is this old, so missing sessions cannot keep the server busy.
+ */
+const MISS_TTL_MS = 5 * 60_000;
+/** Codex rollout file name: rollout-YYYY-MM-DDTHH-MM-SS-<thread id>.jsonl */
+const ROLLOUT_NAME = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)\.jsonl$/;
+/** Codex adds the repository's AGENTS.md to a session as a user message starting with this. */
+const AGENTS_MD_PREFIX = '# AGENTS.md instructions';
 const PROMPT_MAX = 80;
 /** The Codex session index is small; anything past this is read from its end only. */
 const INDEX_MAX_BYTES = 8 * 1024 * 1024;
@@ -54,11 +62,11 @@ interface FileState {
 
 type Rec = Record<string, unknown>;
 
-/** First line of a user prompt, or undefined for empty text and injected context (`<system-reminder>` etc.). */
+/** First line of a user prompt, or undefined for empty text and injected context (`<system-reminder>`, AGENTS.md). */
 export function promptLine(text: unknown): string | undefined {
   if (typeof text !== 'string') return undefined;
   const t = text.trim();
-  if (!t || t.startsWith('<')) return undefined;
+  if (!t || t.startsWith('<') || t.startsWith(AGENTS_MD_PREFIX)) return undefined;
   const first = (t.split(/\r?\n/).find((l) => l.trim()) ?? '').trim();
   return first.length > PROMPT_MAX ? `${first.slice(0, PROMPT_MAX)}…` : first;
 }
@@ -153,10 +161,8 @@ function feedLines(buf: Buffer, apply: (rec: Rec) => void): Buffer {
 export class SessionMetaService {
   private readonly now: () => number;
   private readonly files = new Map<string, FileState>();
-  /** `${agent}:${sessionId}` -> transcript path found by searching. */
-  private readonly found = new Map<string, string>();
-  /** `${agent}:${sessionId}` -> time of the last search that found nothing. */
-  private readonly misses = new Map<string, number>();
+  /** Session id -> transcript path, per agent, from the last walk of its transcript folders. */
+  private readonly indexes = new Map<AgentKind, { builtAt: number; paths: Map<string, string> }>();
   private codexIndex: { size: number; mtimeMs: number; names: Map<string, string> } | null = null;
   private readonly warned = new Set<string>();
 
@@ -193,51 +199,44 @@ export class SessionMetaService {
   private locate(agent: AgentKind, sessionId: string, knownPath?: string): string | undefined {
     const known = acceptableTranscriptPath(knownPath);
     if (known && isFile(known)) return known;
-    const key = `${agent}:${sessionId}`;
-    const hit = this.found.get(key);
+    let index = this.indexes.get(agent);
+    const hit = index?.paths.get(sessionId);
     if (hit && isFile(hit)) return hit;
-    this.found.delete(key);
-    const missAt = this.misses.get(key);
-    if (missAt !== undefined && this.now() - missAt < MISS_TTL_MS) return undefined;
-    const p = agent === 'claude' ? this.searchClaude(sessionId) : this.searchCodex(sessionId);
-    if (p) {
-      this.found.set(key, p);
-      this.misses.delete(key);
-    } else {
-      this.misses.set(key, this.now());
-    }
-    return p;
+    if (index && this.now() - index.builtAt < MISS_TTL_MS) return undefined;
+    index = { builtAt: this.now(), paths: agent === 'claude' ? this.indexClaude() : this.indexCodex() };
+    this.indexes.set(agent, index);
+    return index.paths.get(sessionId);
   }
 
-  private searchClaude(sessionId: string): string | undefined {
+  /** Every <claudeHome>/projects/<project>/<session>.jsonl, in one pass. */
+  private indexClaude(): Map<string, string> {
+    const paths = new Map<string, string>();
     const projects = path.join(this.opts.claudeHome, 'projects');
     for (const d of readDirs(projects)) {
-      const p = path.join(projects, d, `${sessionId}.jsonl`);
-      if (isFile(p)) return p;
+      const dir = path.join(projects, d);
+      for (const name of readFiles(dir)) {
+        if (name.endsWith('.jsonl')) paths.set(name.slice(0, -'.jsonl'.length), path.join(dir, name));
+      }
     }
-    return undefined;
+    return paths;
   }
 
-  /** Codex rollouts live in sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl; newest days are searched first. */
-  private searchCodex(sessionId: string): string | undefined {
-    const suffix = `-${sessionId}.jsonl`;
+  /** Every Codex rollout in sessions/YYYY/MM/DD; for a thread found twice, the newest day wins. */
+  private indexCodex(): Map<string, string> {
+    const paths = new Map<string, string>();
     const root = path.join(this.opts.codexHome, 'sessions');
-    for (const y of readDirs(root).sort().reverse()) {
-      for (const m of readDirs(path.join(root, y)).sort().reverse()) {
-        for (const d of readDirs(path.join(root, y, m)).sort().reverse()) {
+    for (const y of readDirs(root).sort()) {
+      for (const m of readDirs(path.join(root, y)).sort()) {
+        for (const d of readDirs(path.join(root, y, m)).sort()) {
           const dir = path.join(root, y, m, d);
-          let names: string[];
-          try {
-            names = fs.readdirSync(dir);
-          } catch {
-            continue;
+          for (const name of readFiles(dir).sort()) {
+            const id = ROLLOUT_NAME.exec(name)?.[1];
+            if (id) paths.set(id, path.join(dir, name));
           }
-          const name = names.find((n) => n.endsWith(suffix));
-          if (name) return path.join(dir, name);
         }
       }
     }
-    return undefined;
+    return paths;
   }
 
   private read(file: string, st: fs.Stats, apply: (s: FileState, rec: Rec) => void): FileState {
@@ -303,6 +302,14 @@ function isFile(p: string): boolean {
     return fs.statSync(p).isFile();
   } catch {
     return false;
+  }
+}
+
+function readFiles(dir: string): string[] {
+  try {
+    return fs.readdirSync(dir);
+  } catch {
+    return [];
   }
 }
 

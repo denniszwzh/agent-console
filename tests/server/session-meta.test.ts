@@ -120,10 +120,29 @@ describe('SessionMetaService (Claude)', () => {
     const s = svc(() => now);
     expect(s.describe('claude', 'late')).toEqual({});
     writeFileSync(claudeFile('late'), line({ type: 'custom-title', customTitle: '晚到' }));
-    now += 30_000;
+    now += 4 * 60_000;
     expect(s.describe('claude', 'late')).toEqual({});
-    now += 31_000;
+    now += 61_000;
     expect(s.describe('claude', 'late').title).toBe('晚到');
+  });
+
+  it('searches once for several missing sessions', () => {
+    for (const d of ['C--a', 'C--b', 'C--c']) mkdirSync(join(claudeHome, 'projects', d));
+    writeFileSync(claudeFile('here'), line({ type: 'custom-title', customTitle: '在' }));
+    const real = fs.readdirSync;
+    let calls = 0;
+    vi.spyOn(fs, 'readdirSync').mockImplementation(((...args: Parameters<typeof fs.readdirSync>) => {
+      calls++;
+      return (real as (...a: unknown[]) => unknown)(...args);
+    }) as typeof fs.readdirSync);
+    const s = svc(() => 1_000_000);
+    expect(s.describe('claude', 'gone-1')).toEqual({});
+    const afterFirst = calls;
+    expect(afterFirst).toBeGreaterThan(0);
+    expect(s.describe('claude', 'gone-2')).toEqual({});
+    expect(s.describe('claude', 'gone-3')).toEqual({});
+    expect(s.describe('claude', 'here').title).toBe('在');
+    expect(calls).toBe(afterFirst);
   });
 
   it('returns empty meta on unreadable input', () => {
@@ -152,5 +171,16 @@ describe('SessionMetaService (Codex)', () => {
   it('falls back to the first Codex user message', () => {
     writeFileSync(codexFile(), codexMeta + codexUser('<environment_context>\n  <cwd>C:\\x</cwd>') + codexUser('寫一份 docs/design.md'));
     expect(svc().describe('codex', CODEX_ID)).toMatchObject({ title: '寫一份 docs/design.md', titleSource: 'prompt' });
+  });
+
+  it('skips the injected AGENTS.md message', () => {
+    writeFileSync(
+      codexFile(),
+      codexMeta +
+        codexUser('<environment_context>\n  <cwd>C:\\x</cwd>') +
+        codexUser('# AGENTS.md instructions for C:\\x\n\n<INSTRUCTIONS>\nbe nice\n</INSTRUCTIONS>') +
+        codexUser('整理 README'),
+    );
+    expect(svc().describe('codex', CODEX_ID)).toMatchObject({ title: '整理 README', titleSource: 'prompt' });
   });
 });
