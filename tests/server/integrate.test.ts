@@ -204,6 +204,49 @@ describe('integrate', () => {
     expect(submitted).toEqual(['unit-1']);
   });
 
+  it('a thread under a failed thread is concluded before the nearest ancestor that takes part', async () => {
+    const { engine, adapter, store, submitted } = setup((req, n) => {
+      if (req.fork) return n === 2 ? [{ type: 'error', message: 'boom' }] : answer(`fork-${n}`);
+      return answer(req.parentSessionId, `Concluded ${req.parentSessionId}.`);
+    });
+    const a = engine.ask('unit-1', anchor, 'a');
+    await engine.whenIdle();
+    const b = engine.ask('unit-1', msgAnchor(engine.getThread(a.id)), 'b', a.id);
+    await engine.whenIdle();
+    expect(engine.getThread(b.id).status).toBe('error');
+    // A leftover child of the failed thread, sent on its own (forks the main session: b has no session).
+    const u = store.get('unit-1')!;
+    u.threads.push({ ...u.threads.find((t) => t.id === b.id)!, id: 'c', parentThreadId: b.id, status: 'draft', sessionId: null, error: undefined, forkFromSessionId: 'main-sess' });
+    store.save(u);
+    const fresh = new ThreadEngine(store, new EventBus(), { claude: adapter }, 3, { gitStatus: async () => null });
+    fresh.setSubmitter(async (id) => {
+      submitted.push(id);
+    });
+    fresh.sendThread('c');
+    await fresh.whenIdle();
+    fresh.integrate('unit-1');
+    await fresh.whenIdle();
+    const conclusions = adapter.requests.filter((r) => !r.fork);
+    expect(conclusions.map((r) => r.parentSessionId)).toEqual(['fork-3', 'fork-1']);
+    expect(conclusions[1].prompt).toContain('Concluded fork-3.');
+    expect(submitted).toEqual(['unit-1']);
+  });
+
+  it('a draft child sent while its parent is answering is refused', async () => {
+    const gate = deferred();
+    const { engine } = setup(async (req, n) => {
+      if (n === 2) await gate.promise;
+      return scripted()(req, n);
+    });
+    const p = engine.ask('unit-1', anchor, 'q');
+    await engine.whenIdle();
+    const d = engine.addDraft('unit-1', msgAnchor(engine.getThread(p.id)), 'child', p.id);
+    engine.followUp(p.id, 'more');
+    expect(() => engine.sendThread(d.id)).toThrow(ConflictError);
+    gate.resolve();
+    await engine.whenIdle();
+  });
+
   it('a failed conclusion stops integration once every run ends; integrating again reruns only the rest', async () => {
     let failSecond = true;
     const { engine, adapter, store, submitted } = setup((req, n) => {
@@ -395,5 +438,25 @@ describe('integrate route and bundle', () => {
     expect(md).not.toContain('question b\n');
     expect(md).not.toContain('question c');
     expect(md.match(/^## /gm)).toHaveLength(2);
+  });
+
+  it('the bundle folds a thread under a failed middle thread into the nearest concluded ancestor', () => {
+    const t = (id: string, status: Thread['status'], parent: string | null = null): Thread => ({
+      id,
+      unitId: 'unit-1',
+      parentThreadId: parent,
+      anchor,
+      forkFromSessionId: 'main-sess',
+      sessionId: `f-${id}`,
+      status,
+      messages: [{ id: `m-${id}`, role: 'user', content: `question ${id}`, createdAt: 'x' }],
+      conclusion: status === 'resolved' ? `conclusion ${id}` : null,
+      noConclusion: false,
+    });
+    const store = new UnitStore();
+    const unit = makeUnit(store, { threads: [t('a', 'resolved'), t('b', 'error', 'a'), t('c', 'resolved', 'b')] });
+    const md = buildConclusionBundle(unit);
+    expect(md.match(/^## /gm)).toHaveLength(1);
+    expect(md).toContain('conclusion a');
   });
 });

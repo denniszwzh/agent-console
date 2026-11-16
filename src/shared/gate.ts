@@ -1,13 +1,5 @@
 import type { ReviewUnit, Thread } from './types.js';
 
-/**
- * Submission gate shared by the server and the web UI: the unit must be open,
- * have at least one thread, and every thread (nested ones included) must be resolved.
- */
-export function canSubmit(unit: ReviewUnit): boolean {
-  return unit.status === 'open' && unit.threads.length > 0 && unit.threads.every((t) => t.status === 'resolved');
-}
-
 /** Threads that never enter the conclusions: unsent drafts, failed runs and expired threads. */
 export function isExcluded(t: Thread): boolean {
   return t.status === 'draft' || t.status === 'error' || t.status === 'expired';
@@ -37,4 +29,34 @@ export function integrationState(unit: ReviewUnit): IntegrationState {
   const answered = taking.filter((t) => t.status === 'awaiting').length + concluded;
   const canIntegrate = unit.status === 'open' && unit.integrating !== true && answering === 0 && answered > 0;
   return { answering, answered, concluded, total: taking.length, canIntegrate };
+}
+
+/**
+ * The nearest descendants of a thread that take part in the conclusions: an excluded child is looked
+ * through to its own children, so a thread under a failed one still reaches its concluded ancestor.
+ */
+export function concludableChildren(threads: Thread[], id: string): Thread[] {
+  const out: Thread[] = [];
+  const seen = new Set<string>([id]);
+  const walk = (parent: string) => {
+    for (const t of threads) {
+      if (t.parentThreadId !== parent || seen.has(t.id)) continue;
+      seen.add(t.id);
+      if (isExcluded(t)) walk(t.id);
+      else out.push(t);
+    }
+  };
+  walk(id);
+  return out;
+}
+
+/** Whether an ancestor taking part in the conclusions carries this thread's conclusion. */
+export function carriedByAncestor(threads: Thread[], thread: Thread): boolean {
+  const byId = new Map(threads.map((t) => [t.id, t]));
+  const seen = new Set<string>([thread.id]);
+  for (let p = thread.parentThreadId ? byId.get(thread.parentThreadId) : undefined; p && !seen.has(p.id); p = p.parentThreadId ? byId.get(p.parentThreadId) : undefined) {
+    seen.add(p.id);
+    if (!isExcluded(p)) return true;
+  }
+  return false;
 }

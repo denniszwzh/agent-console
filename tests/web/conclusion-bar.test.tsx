@@ -54,6 +54,20 @@ describe('ConclusionBar', () => {
     expect(integrate()).toHaveProperty('disabled', false);
   });
 
+  it('after submitting, a thread under a failed thread is folded into its concluded ancestor', () => {
+    const unit = makeUnit({ status: 'submitted' });
+    const a = anchorOn(unit);
+    unit.threads = [
+      makeThread('t1', a, { status: 'resolved', conclusion: 'Top.' }),
+      makeThread('t2', a, { parentThreadId: 't1', status: 'error' }),
+      makeThread('t3', a, { parentThreadId: 't2', status: 'resolved', conclusion: 'Folded.' }),
+    ];
+    renderInUnit(<ConclusionBar />, unit);
+    fireEvent.click(screen.getByRole('button', { name: /查看結論/ }));
+    expect(screen.getByText('Top.')).toBeTruthy();
+    expect(screen.queryByText('Folded.')).toBeNull();
+  });
+
   it('after submitting, lists the conclusions read-only with the delivery hint', () => {
     const unit = makeUnit({ status: 'submitted' });
     const a = anchorOn(unit);

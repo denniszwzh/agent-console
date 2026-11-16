@@ -1,5 +1,5 @@
 import type { ReviewUnit, Thread } from '../shared/types.js';
-import { isExcluded } from '../shared/gate.js';
+import { carriedByAncestor } from '../shared/gate.js';
 
 const QUOTE_LIMIT = 300;
 
@@ -34,18 +34,9 @@ export function buildConclusionBundle(unit: ReviewUnit): string {
     '',
     'Please apply the conclusions below. If a file has changed since, use the quoted text to relocate the passage.',
   ];
-  // A concluded thread is listed unless an ancestor carries it: children of a failed or unsent
-  // thread have no concluded parent to fold into, so they are listed on their own.
-  const byId = new Map(unit.threads.map((t) => [t.id, t]));
-  const carriedByAncestor = (t: (typeof unit.threads)[number]) => {
-    const seen = new Set<string>();
-    for (let p = t.parentThreadId ? byId.get(t.parentThreadId) : undefined; p && !seen.has(p.id); p = p.parentThreadId ? byId.get(p.parentThreadId) : undefined) {
-      seen.add(p.id);
-      if (!isExcluded(p)) return true;
-    }
-    return false;
-  };
-  const top = unit.threads.filter((t) => t.status === 'resolved' && !carriedByAncestor(t));
+  // A concluded thread is listed unless an ancestor that takes part carries it (children of a failed
+  // or unsent thread were folded into the nearest concluded ancestor, or stand on their own).
+  const top = unit.threads.filter((t) => t.status === 'resolved' && !carriedByAncestor(unit.threads, t));
   top.forEach((t, i) => {
     const question = t.messages.find((m) => m.role === 'user')?.content ?? '';
     const conclusion = t.noConclusion ? '(clarification only — no change)' : (t.conclusion ?? '');

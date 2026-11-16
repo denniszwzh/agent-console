@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentAdapter, AgentEvent } from '../agents/adapter.js';
 import { splitBlocks } from '../shared/blocks.js';
-import { integrationState, isExcluded } from '../shared/gate.js';
+import { concludableChildren, integrationState, isExcluded } from '../shared/gate.js';
 import type { AgentKind, Anchor, Message, ReviewUnit, Thread } from '../shared/types.js';
 import type { EventBus } from './events.js';
 import { changedPaths, defaultGitStatus, defaultStat, fingerprint, type Fingerprints, type GitStatusProbe, type StatFn } from './postcheck.js';
@@ -152,11 +152,7 @@ export class ThreadEngine {
 
   /** Creates a thread and sends it at once: its fork starts answering right away. */
   ask(unitId: string, anchor: Anchor, question: string, parentThreadId?: string): Thread {
-    if (parentThreadId) {
-      const parent = this.openUnit(unitId).threads.find((t) => t.id === parentThreadId);
-      // Forking the parent's session while it is still writing would branch from a half-written turn.
-      if (parent?.status === 'answering') throw new ConflictError('parent thread is busy');
-    }
+    if (parentThreadId) this.assertParentIdle(this.openUnit(unitId), parentThreadId);
     const thread = this.addDraft(unitId, anchor, question, parentThreadId);
     this.sendThread(thread.id);
     return this.getThread(thread.id);
@@ -168,6 +164,7 @@ export class ThreadEngine {
     this.assertOpen(unit);
     this.assertNotIntegrating(unit);
     if (thread.status !== 'draft') throw new ConflictError('only unsent threads can be sent');
+    if (thread.parentThreadId) this.assertParentIdle(unit, thread.parentThreadId);
     // The parent gains an answered child: it and every concluded ancestor must be concluded again.
     this.reopenChain(unit, thread.parentThreadId);
     thread.status = 'answering';
@@ -231,7 +228,12 @@ export class ThreadEngine {
 
   /** Children still to be concluded; failed and unsent children are left out and do not block. */
   private hasOpenChildren(unit: ReviewUnit, threadId: string): boolean {
-    return unit.threads.some((t) => t.parentThreadId === threadId && (t.status === 'awaiting' || t.status === 'answering'));
+    return concludableChildren(unit.threads, threadId).some((t) => t.status === 'awaiting' || t.status === 'answering');
+  }
+
+  /** Forking a parent's session while it is still writing would branch from a half-written turn. */
+  private assertParentIdle(unit: ReviewUnit, parentThreadId: string): void {
+    if (unit.threads.find((t) => t.id === parentThreadId)?.status === 'answering') throw new ConflictError('parent thread is busy');
   }
 
   private assertNotIntegrating(unit: ReviewUnit): void {
@@ -270,8 +272,8 @@ export class ThreadEngine {
   }
 
   private startConclusion(unit: ReviewUnit, thread: Thread): void {
-    const childConclusions = unit.threads
-      .filter((t) => t.parentThreadId === thread.id && t.status === 'resolved' && t.conclusion)
+    const childConclusions = concludableChildren(unit.threads, thread.id)
+      .filter((t) => t.status === 'resolved' && t.conclusion)
       .map((t) => t.conclusion as string);
     thread.status = 'answering';
     delete thread.error;

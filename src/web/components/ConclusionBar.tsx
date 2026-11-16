@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { integrationState } from '../../shared/gate.js';
+import { carriedByAncestor, integrationState } from '../../shared/gate.js';
 import type { ReviewUnit, Thread } from '../../shared/types.js';
 import { firstLine } from '../labels.js';
 import { fire, useUnit } from '../unit-context.js';
@@ -85,10 +85,8 @@ export function ConclusionBar() {
   const state = integrationState(unit);
   const integrating = unit.integrating === true;
   const submitted = unit.status === 'submitted';
-  // Children are folded into their parent's conclusion, so the list shows the top of each chain.
-  const concluded = unit.threads.filter(
-    (t) => t.status === 'resolved' && !unit.threads.some((p) => p.id === t.parentThreadId && p.status === 'resolved'),
-  );
+  // Children are folded into their nearest concluded ancestor, as in the bundle.
+  const concluded = unit.threads.filter((t) => t.status === 'resolved' && !carriedByAncestor(unit.threads, t));
 
   let reason = '';
   if (!submitted && !integrating) {

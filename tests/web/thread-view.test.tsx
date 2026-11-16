@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, screen } from '@testing-library/react';
 import { ThreadView } from '../../src/web/components/ThreadView.js';
+import { UnitProvider } from '../../src/web/unit-context.js';
 import { anchorOn, assistant, fakeActions, makeThread, makeUnit, renderInUnit } from './fixtures.js';
 
 afterEach(cleanup);
@@ -64,10 +65,18 @@ describe('ThreadView', () => {
   });
 
   it('nothing can be changed while conclusions are being integrated', () => {
-    const unit = makeUnit({ integrating: true });
+    const unit = makeUnit();
     const t = makeThread('t1', anchorOn(unit));
     unit.threads = [t];
-    renderInUnit(<ThreadView thread={t} />, unit);
+    const actions = fakeActions();
+    const { rerender } = renderInUnit(<ThreadView thread={t} />, unit, actions);
+    expect(screen.getByRole('button', { name: '追問' })).toBeTruthy();
+    rerender(
+      <UnitProvider unit={{ ...unit, integrating: true }} actions={actions}>
+        <ThreadView thread={t} />
+      </UnitProvider>,
+    );
+    expect(screen.getByText('Question t1?')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '追問' })).toBeNull();
   });
 

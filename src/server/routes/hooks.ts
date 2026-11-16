@@ -153,9 +153,13 @@ export function registerHookRoutes(
       for (const prev of store.listBySession(sessionId)) {
         if (prev.status !== 'open') continue;
         prev.status = 'stale';
+        // Answers stay readable as they were; only unsent and unfinished threads end here. A thread
+        // being concluded already has its answer.
+        for (const t of prev.threads) {
+          if (t.status === 'answering' && prev.integrating) t.status = 'awaiting';
+          else if (t.status === 'draft' || t.status === 'answering') t.status = 'expired';
+        }
         delete prev.integrating;
-        // Answers stay readable as they were; only unsent and unfinished threads end here.
-        for (const t of prev.threads) if (t.status === 'draft' || t.status === 'answering') t.status = 'expired';
         store.save(prev);
         staled.push(prev);
       }

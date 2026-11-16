@@ -89,7 +89,6 @@ describe('stop hook ingestion', () => {
       anchor: { sourceId: 's', blockId: 'b', quote: '', headingPath: [], startLine: 1, endLine: 1 },
     });
     u.threads = [mkThread('t1', 'awaiting'), mkThread('t2', 'resolved'), mkThread('t3', 'draft'), mkThread('t4', 'answering')];
-    u.integrating = true;
     store.save(u);
 
     const events: ServerEvent[] = [];
@@ -99,10 +98,36 @@ describe('stop hook ingestion', () => {
     const old = store.get(first)!;
     expect(old.status).toBe('stale');
     expect(old.threads.map((t) => t.status)).toEqual(['awaiting', 'resolved', 'expired', 'expired']);
-    expect(old.integrating).toBeUndefined();
     expect(store.get(second)!.status).toBe('open');
     expect(events).toContainEqual({ type: 'unit.updated', unitId: first, sessionId: 'sess-1' });
     expect(events).toContainEqual({ type: 'unit.created', unitId: second, sessionId: 'sess-1' });
+  });
+
+  it('a thread being concluded when the unit goes stale keeps its answer', async () => {
+    const store = new UnitStore();
+    const bus = new EventBus();
+    const app = buildApp({ store, token: TOKEN, port: PORT, bus });
+    const first = (await stop(app)).json().unitId as string;
+    const u = store.get(first)!;
+    u.threads = [
+      {
+        id: 't1',
+        unitId: first,
+        parentThreadId: null,
+        forkFromSessionId: 'sess-1',
+        sessionId: 'fork',
+        status: 'answering',
+        messages: [],
+        conclusion: null,
+        noConclusion: false,
+        anchor: { sourceId: 's', blockId: 'b', quote: '', headingPath: [], startLine: 1, endLine: 1 },
+      },
+    ];
+    u.integrating = true;
+    store.save(u);
+    await stop(app);
+    expect(store.get(first)!.threads[0].status).toBe('awaiting');
+    expect(store.get(first)!.integrating).toBeUndefined();
   });
 
   it('ignores fork sessions', async () => {
