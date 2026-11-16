@@ -109,6 +109,27 @@ threads being answered, open threads, and the state of the latest reply. While s
 open its latest reply. Releasing Alt, pressing Esc, or switching away from the window closes the switcher. The shortcut
 works only while the panel's browser tab has focus.
 
+## Sidebar groups and the conversation view
+
+The sidebar groups sessions by project. A session's project is the folder holding its `.git`; a git worktree (including
+Claude Code's `.claude/worktrees/<name>`, even after it was deleted) is listed under its main repository with the
+worktree name on its second line. Groups are ordered by their newest reply, and each group can be collapsed (the
+panel remembers it). Claude sessions are marked in orange, Codex sessions in green.
+
+Selecting a session shows the whole session as one conversation, like the terminal: each turn's prompts, then the
+agent's reply, oldest first, opened at the bottom. Scrolling up loads earlier turns. A new reply is followed when the
+view is at the bottom; otherwise a 「↓ 新回覆」 button appears. Only the newest turn can be reviewed while it is open:
+its changed files are tabs above the conversation, and the conclusion bar and 「＋ 加入檔案」 belong to it. Earlier
+turns are read-only; their changed files open as temporary tabs.
+
+The prompts come from the agent's transcript. The server reads them when a reply arrives, and fills in earlier
+replies in the background after it starts. It skips text the agents inject (system reminders, environment context,
+AGENTS.md, interrupt markers) and shows Agent Console's own "apply the review conclusions" message as a marker. The
+first reply of a session shows only the prompt just before it; a turn keeps at most its five newest prompts.
+
+The panel remembers the selected session and the reading position in the browser's localStorage, so reloading the
+page (F5) returns to the same place.
+
 ## Files changed outside the edit tools
 
 The agent's own edit records (Claude `Write`/`Edit`, Codex `apply_patch`) miss files written by shell commands. So
