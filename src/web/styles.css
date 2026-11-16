@@ -24,6 +24,10 @@
   --warn-soft: #fff3d6;
   --ok: #1f7a4d;
   --ok-soft: #e3f3ea;
+  --agent-claude: #c96442;
+  --agent-claude-soft: #f8e9e2;
+  --agent-codex: var(--ok);
+  --agent-codex-soft: var(--ok-soft);
   --shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 4px 16px rgb(0 0 0 / 0.04);
   --radius: 8px;
   color-scheme: light;
@@ -50,6 +54,8 @@
     --warn-soft: #36290f;
     --ok: #7ccaa0;
     --ok-soft: #183026;
+    --agent-claude: #e08a6a;
+    --agent-claude-soft: #3a2219;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.25);
     color-scheme: dark;
   }
@@ -243,14 +249,48 @@ textarea {
   color: var(--muted);
   font-size: 0.875rem;
 }
-.session-list,
-.unit-history {
+.project-list,
+.session-list {
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.session-btn,
-.unit-btn {
+.project-group + .project-group {
+  margin-top: 0.35rem;
+}
+.project-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.35rem 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.project-head:hover {
+  background: var(--accent-faint);
+}
+.project-caret {
+  width: 0.8rem;
+  color: var(--muted);
+}
+.project-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-group .session-list {
+  margin-left: 0.6rem;
+}
+.session-btn {
   display: flex;
   width: 100%;
   border: 0;
@@ -264,8 +304,7 @@ textarea {
   gap: 0.6rem;
   padding: 0.5rem 0.75rem;
 }
-.session-btn:hover,
-.unit-btn:hover {
+.session-btn:hover {
   background: var(--accent-faint);
 }
 .session.selected > .session-btn {
@@ -279,8 +318,11 @@ textarea {
   border-radius: 50%;
   background: var(--accent);
 }
+.agent-dot.agent-claude {
+  background: var(--agent-claude);
+}
 .agent-dot.agent-codex {
-  background: var(--ok);
+  background: var(--agent-codex);
 }
 .session-name {
   display: flex;
@@ -304,8 +346,7 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.session-meta,
-.unit-btn-meta {
+.session-meta {
   font-size: 0.75rem;
   color: var(--muted);
 }
@@ -317,26 +358,6 @@ textarea {
   color: var(--warn);
   font-size: 0.75rem;
   font-weight: 600;
-}
-.unit-history {
-  margin: 0.25rem 0 0.5rem 1.4rem;
-  border-left: 1px solid var(--border-strong);
-}
-.unit-btn {
-  flex-direction: column;
-  padding: 0.35rem 0.75rem;
-  border-radius: 0 6px 6px 0;
-}
-.unit-btn.selected {
-  background: var(--accent-soft);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-.unit-btn-line {
-  font-size: 0.85rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
 }
 
 /* ---- Unit header, banners, tabs ---------------------------------------- */
@@ -363,6 +384,14 @@ textarea {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 0.7rem;
+}
+.agent-badge.agent-claude {
+  background: var(--agent-claude-soft);
+  color: var(--agent-claude);
+}
+.agent-badge.agent-codex {
+  background: var(--agent-codex-soft);
+  color: var(--agent-codex);
 }
 .unit-cwd {
   font-family: var(--font-mono);

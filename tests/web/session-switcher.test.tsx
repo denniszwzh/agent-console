@@ -153,9 +153,9 @@ describe('SessionSwitcher', () => {
     expect(r2.getAttribute('aria-current')).toBe('true');
     expect(r1.getAttribute('aria-current')).toBeNull();
     fireEvent.click(r1);
-    expect(onSelect).toHaveBeenLastCalledWith('s1', 'u-new');
+    expect(onSelect).toHaveBeenLastCalledWith('s1');
     fireEvent.click(r2);
-    expect(onSelect).toHaveBeenLastCalledWith('s2', null);
+    expect(onSelect).toHaveBeenLastCalledWith('s2');
   });
 
   it('refreshes relative times every minute', () => {

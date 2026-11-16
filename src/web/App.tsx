@@ -119,6 +119,10 @@ export function App() {
       .map((a) => ({ sessionId: a.sessionId, agent: a.agent, cwd: a.cwd, lastActivity: a.since }));
     return fresh.length ? [...fresh, ...sessions] : sessions;
   }, [sessions, activity]);
+  const selectSession = (session: string) => {
+    const list = units[session];
+    setSel({ session, unit: list?.[list.length - 1]?.id ?? null });
+  };
   const respondingIds = useMemo(() => new Set(activity.map((a) => a.sessionId)), [activity]);
   const selectedActivity = sel.session ? activity.find((a) => a.sessionId === sel.session) : undefined;
 
@@ -174,13 +178,12 @@ export function App() {
           responding={respondingIds}
           unitsBySession={units}
           selectedSession={sel.session}
-          selectedUnit={sel.unit}
           drawer={layout.compact}
           onHide={layout.hide}
-          onSelect={(session, unit) => {
-            setSel({ session, unit });
-            // In the drawer, picking a reply returns the full screen to the content.
-            if (layout.compact && unit) layout.hide();
+          onSelect={(session) => {
+            selectSession(session);
+            // In the drawer, picking a session returns the full screen to the content.
+            if (layout.compact) layout.hide();
           }}
         />
       )}
@@ -191,8 +194,8 @@ export function App() {
           unitsBySession={units}
           activity={activity}
           selectedSession={sel.session}
-          onSelect={(session, unit) => {
-            setSel({ session, unit });
+          onSelect={(session) => {
+            selectSession(session);
             switcher.close();
             if (layout.compact) layout.hide();
           }}

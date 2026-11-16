@@ -67,7 +67,7 @@ interface Props {
   unitsBySession: Record<string, ReviewUnit[] | undefined>;
   activity: SessionActivity[];
   selectedSession: string | null;
-  onSelect(sessionId: string, unitId: string | null): void;
+  onSelect(sessionId: string): void;
 }
 
 export function SessionSwitcher({ sessions, unitsBySession, activity, selectedSession, onSelect }: Props) {
@@ -98,7 +98,7 @@ export function SessionSwitcher({ sessions, unitsBySession, activity, selectedSe
                   type="button"
                   className={`switcher-item${current ? ' current' : ''}`}
                   aria-current={current ? 'true' : undefined}
-                  onClick={() => onSelect(s.sessionId, latest?.id ?? null)}
+                  onClick={() => onSelect(s.sessionId)}
                 >
                   <span className="switcher-line">
                     <span className={`agent-dot agent-${s.agent}`} aria-hidden="true" />
