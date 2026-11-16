@@ -13,28 +13,44 @@ Everything runs locally: the server listens on `127.0.0.1` only, the UI is bundl
 
 ## Requirements
 
-- Windows 11 (primary target; macOS/Linux should work but are not tested)
-- Node.js 22
-- Claude Code (tested with 2.1.302) and/or Codex CLI (tested with 0.167.0; the Codex `Interrupt` hook needs a version that has that event) on `PATH`
-- git (used for the post-run change check; optional, the check is skipped outside a git repo)
+- Windows 11 is the primary target. macOS and Linux should work but are not tested.
+- [Node.js](https://nodejs.org/) 22 or newer, with npm.
+- [git](https://git-scm.com/), to clone the repository. The server also uses it for the post-run change check;
+  outside a git repository that check is skipped.
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.302) and/or
+  [Codex CLI](https://github.com/openai/codex) (tested with 0.167.0; the Codex `Interrupt` hook needs a version
+  that has that event), installed and signed in, with `claude` / `codex` on your `PATH`. The read-only forks run
+  these same commands under your own account.
 
-## Build
+Nothing else is needed: every dependency comes from the public npm registry, and the panel is built locally (no CDN).
+
+## Getting started
+
+### 1. Clone and build
 
 ```
-npm install        # runs "prepare", which builds dist/
-npm run build      # rebuild after changes
-npm test           # vitest
+git clone <repository-url> agent-console
+cd agent-console
+npm install
 ```
 
-To get the `agent-console` command on your `PATH`, install the package from its folder:
+`npm install` also builds the server, hooks and panel into `dist/` (the `prepare` script). Keep this folder: the
+hooks you install in step 3 run the scripts in its `dist/hooks/`, so moving or deleting the folder breaks them (see
+"Update" and "Uninstall" below).
+
+Optional check: `npm test` runs the test suite (a few tests call the real `git`).
+
+### 2. Put the `agent-console` command on your PATH
 
 ```
 npm install -g .
 ```
 
-(or run `node dist/cli/main.js` directly).
+This links the global command to this folder. If your npm prefix needs administrator rights (common on Linux and
+macOS with a system Node), use a Node version manager instead, or skip this step and run `node dist/cli/main.js`
+wherever this README says `agent-console`.
 
-## Install the hooks
+### 3. Install the hooks
 
 ```
 agent-console install
@@ -42,27 +58,63 @@ agent-console install
 
 - Claude: adds a `Stop` and a `UserPromptSubmit` hook to `~/.claude/settings.json`.
 - Codex: adds `Stop`, `UserPromptSubmit` and `Interrupt` hooks to `~/.codex/hooks.json` (`$CODEX_HOME` is honoured;
-  skipped if the directory does not exist). The last two only drive the "responding" status.
+  skipped if the directory does not exist, so run Codex once first). The last two only drive the "responding"
+  status.
 
 Each file is shown as a before/after dump of its `hooks` section and only written after you confirm; a backup
-(`<file>.agent-console-backup-<timestamp>`) is made first.
+(`<file>.agent-console-backup-<timestamp>`) is made first. Existing hooks of other tools are kept. Every command
+the installer writes points at this folder's `dist/hooks/` and ends with `--agent-console-hook`, which is how
+`uninstall` finds them again.
 
 **Codex trust step:** Codex silently skips hooks it has not been told to trust. After installing, open the Codex
 TUI once and run `/hooks` to review and trust the Agent Console hooks (`Stop`, `UserPromptSubmit`, `Interrupt`).
-Until then Codex turns will not appear in the panel. Hooks added by a later `install` need the same trust step.
+Until then Codex turns will not appear in the panel. Hooks added or changed by a later `install` need the same
+trust step.
 
-## Start
+### 4. Start the panel
 
 ```
 agent-console
 ```
 
 Starts the server and opens the browser at `http://127.0.0.1:<port>/auth?token=...` (the console prints the same
-URL). The token is stored in `~/.agent-console/token` and stays the same across restarts. Running `agent-console`
-again while it is already running just opens the browser on the running instance. If the port is taken by another
-program you get an `EADDRINUSE` message; change `port` in the config.
+URL). The token is stored in `~/.agent-console/token` and stays the same across restarts. Opening that URL once per
+browser profile signs the browser in (it sets a cookie); after that `http://127.0.0.1:<port>/` is enough. Running
+`agent-console` again while it is already running just opens the browser on the running instance. If the port is
+taken by another program you get an `EADDRINUSE` message; change `port` in the config.
 
-There is no start-at-login option; start it once per login.
+Keep it running while you work. There is no start-at-login option; start it once per login.
+
+### 5. Use it with Claude Code or Codex
+
+Work in the terminal as usual (`claude` or `codex`, in any project folder). Each time the agent finishes a turn, the
+reply appears in the panel under its project, with the files it changed as tabs. Select text in the reply or a file,
+ask, and press 「送出」; the answer comes from a read-only fork of that session. When you want the main session to
+act on what you found, press 「整合結論」 and then send your next message in the terminal (see "Asking and
+integrating conclusions" and "How the conclusions get back").
+
+### Update
+
+```
+git pull
+npm install
+```
+
+`npm install` rebuilds `dist/`. Restart the panel afterwards (stop the running `agent-console` process and start it
+again). The hooks keep working as long as the folder stays where it is; if a new version changes them, run
+`agent-console install` again (and repeat the Codex trust step).
+
+### Uninstall
+
+Remove the hooks before you delete the folder:
+
+```
+agent-console uninstall
+npm uninstall -g agent-console
+```
+
+`uninstall` removes only the hooks that `install` added (with the same confirm-and-backup flow). Then delete the
+folder, and `~/.agent-console/` to remove all data.
 
 ## Configuration
 
@@ -205,15 +257,6 @@ instruction with a copy button; paste it into Codex if the next turn did not pic
 - Codex forks run with `-s read-only`, `--disable plugins`, `--disable apps`, `-c features.hooks=false` and every
   configured MCP server disabled by name.
 - Before and after every run the server fingerprints `git status`; any change shows as a red warning in the panel.
-
-## Uninstall
-
-```
-agent-console uninstall
-```
-
-Removes only the hooks that `install` added (with the same confirm-and-backup flow). Delete `~/.agent-console/` to
-remove all data.
 
 ## Known limitations
 

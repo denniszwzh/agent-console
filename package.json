@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "description": "Local review panel for Claude Code and Codex CLI replies: ask about any passage in a read-only fork, then send the conclusions back.",
   "files": [
     "dist",
     "README.md"

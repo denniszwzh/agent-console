@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { addCodexHooks, addHooks, assertRecognisable, HooksShapeError, removeHooks } from './settings-merge.js';
+import { addCodexHooks, addHooks, assertRecognisable, HOOK_MARKER, HooksShapeError, removeHooks } from './settings-merge.js';
 import { callServer } from '../hooks/client.js';
 import { start } from '../server/main.js';
 import { dataDir, ensureToken, readConfig, readServerInfo } from '../server/paths.js';
@@ -83,13 +83,13 @@ export async function applyChange(
 export function hookCommands(): { Stop: string; UserPromptSubmit: string } {
   const p = (name: string) => fileURLToPath(new URL(`../hooks/${name}`, import.meta.url));
   return {
-    Stop: `node "${p('claude-stop.js')}"`,
-    UserPromptSubmit: `node "${p('claude-prompt.js')}"`,
+    Stop: `node "${p('claude-stop.js')}" ${HOOK_MARKER}`,
+    UserPromptSubmit: `node "${p('claude-prompt.js')}" ${HOOK_MARKER}`,
   };
 }
 
 export function codexHookCommands(): { Stop: string; UserPromptSubmit: string; Interrupt: string } {
-  const p = (name: string) => `node "${fileURLToPath(new URL(`../hooks/${name}`, import.meta.url))}"`;
+  const p = (name: string) => `node "${fileURLToPath(new URL(`../hooks/${name}`, import.meta.url))}" ${HOOK_MARKER}`;
   return { Stop: p('codex-stop.js'), UserPromptSubmit: p('codex-activity.js'), Interrupt: p('codex-activity.js') };
 }
 

@@ -156,4 +156,4 @@ no `probe-fixed.txt`.
 Not covered (not tested): managed (policy) settings, which per the documented precedence outrank flag settings; a managed `disableAllHooks: true` would presumably still switch the
 guard off (the PowerShell/Bash default-mode permission checks and the post-check warning remain).
 The scratch repo and temporary home were deleted. The runs left their transcripts under
-`~/.claude/projects/C--Users-Dennis-AppData-Local-Temp-ac-claude-dah-282102/` (new files only; nothing existing was modified).
+`~/.claude/projects/<encoded temp folder>/` (new files only; nothing existing was modified).

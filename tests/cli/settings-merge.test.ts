@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { hookCommands } from '../../src/cli/main.js';
 import { addHooks, assertRecognisable, removeHooks } from '../../src/cli/settings-merge.js';
 
 const cmds = {
@@ -60,5 +61,23 @@ describe('settings-merge', () => {
     const x = fixture();
     addHooks(x, cmds);
     expect(x).toEqual(fixture());
+  });
+
+  it('recognises its hooks wherever the package was installed', () => {
+    const elsewhere = {
+      Stop: 'node "D:\tools\review-panel\dist\hooks\claude-stop.js" --agent-console-hook',
+      UserPromptSubmit: 'node "D:\tools\review-panel\dist\hooks\claude-prompt.js" --agent-console-hook',
+    };
+    expect(() => assertRecognisable(elsewhere)).not.toThrow();
+    expect(removeHooks(addHooks({}, elsewhere))).toEqual({ hooks: {} });
+    // Hooks installed before the marker existed are still removed.
+    expect(removeHooks(addHooks({}, cmds))).toEqual({ hooks: {} });
+    // Another tool's script with the same name, without the marker, is left alone.
+    expect(() => assertRecognisable({ Stop: 'node "D:\other\claude-stop.js"' })).toThrow();
+  });
+
+  it('marks the commands it generates', () => {
+    expect(hookCommands().Stop).toMatch(/claude-stop\.js" --agent-console-hook$/);
+    expect(hookCommands().UserPromptSubmit).toMatch(/claude-prompt\.js" --agent-console-hook$/);
   });
 });

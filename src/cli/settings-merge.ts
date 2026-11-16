@@ -24,11 +24,20 @@ const CODEX_TIMEOUTS: Partial<Record<keyof CodexHookCmds, number>> = { Interrupt
 
 const EVENTS: Array<keyof HookCmds> = ['Stop', 'UserPromptSubmit'];
 
-/** True when a hook command is one of ours: our dist script inside an agent-console path. */
+/** Appended to every hook command install writes, so uninstall finds them wherever the package lives. */
+export const HOOK_MARKER = '--agent-console-hook';
+
+const SCRIPTS = ['claude-stop.js', 'claude-prompt.js', 'codex-stop.js', 'codex-activity.js'];
+
+/**
+ * True when a hook command is one of ours: one of our hook scripts, carrying the marker. Commands
+ * installed before the marker existed are recognised by an "agent-console" folder in their path.
+ */
 function isOurs(command: unknown): boolean {
   if (typeof command !== 'string') return false;
   const c = command.toLowerCase();
-  return c.includes('agent-console') && (c.includes('claude-stop.js') || c.includes('claude-prompt.js') || c.includes('codex-stop.js') || c.includes('codex-activity.js'));
+  if (!SCRIPTS.some((s) => c.includes(s))) return false;
+  return c.endsWith(HOOK_MARKER) || /[\\/]agent-console[\\/]/.test(c);
 }
 
 function clone<T>(v: T): T {
@@ -78,7 +87,7 @@ function assertHooksShape(settings: object): void {
 export function assertRecognisable(hookCmds: HookCmds | CodexHookCmds): void {
   for (const c of Object.values(hookCmds)) {
     if (!isOurs(c)) {
-      throw new Error(`hook command is not recognisable as agent-console's (path must contain "agent-console"): ${c}`);
+      throw new Error(`hook command is not recognisable as agent-console's (it must end with ${HOOK_MARKER}): ${c}`);
     }
   }
 }

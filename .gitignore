@@ -1,2 +1,13 @@
 node_modules/
 dist/
+
+# Local tool state (Claude Code worktrees, session notes, planning workspaces)
+.claude/
+.remember/
+.superpowers/
+
+# Logs and OS files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
