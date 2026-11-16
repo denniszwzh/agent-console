@@ -242,7 +242,7 @@ describe('activity routes', () => {
           id: 't1',
           unitId: 'u1',
           anchor: { sourceId: 'r', blockId: 'b', quote: 'x' },
-          status: 'draft',
+          status: 'answering',
           messages: [],
           createdAt: '2026-11-16T09:00:00.000Z',
         },

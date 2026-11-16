@@ -2,11 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Anchor } from '../../shared/types.js';
-import { codexInstruction, type CodexQueueRunner } from '../../agents/codex.js';
-import { buildConclusionBundle } from '../conclusion.js';
+import type { CodexQueueRunner } from '../../agents/codex.js';
 import type { EventBus } from '../events.js';
 import { resolveUnitImage } from '../images.js';
-import { conclusionFile, pathKey } from '../paths.js';
+import { pathKey } from '../paths.js';
 import { takeSnapshot } from '../snapshot.js';
 import type { UnitStore } from '../store.js';
 import { ConflictError, NotFoundError, ValidationError, type ThreadEngine } from '../threads.js';
@@ -37,7 +36,7 @@ export function registerUnitRoutes(
   app: FastifyInstance,
   deps: { engine: ThreadEngine; store: UnitStore; bus: EventBus; codexQueue: CodexQueueRunner },
 ): void {
-  const { engine, store, bus, codexQueue } = deps;
+  const { engine, store, bus } = deps;
 
   const handle = async (reply: FastifyReply, fn: () => unknown) => {
     try {
@@ -59,7 +58,7 @@ export function registerUnitRoutes(
       if (body.parentThreadId !== undefined && typeof body.parentThreadId !== 'string') {
         throw new ValidationError('parentThreadId must be a string');
       }
-      return engine.addDraft(id, body.anchor, body.question, body.parentThreadId);
+      return engine.ask(id, body.anchor, body.question, body.parentThreadId);
     }),
   );
 
@@ -70,10 +69,11 @@ export function registerUnitRoutes(
     }),
   );
 
-  app.post('/api/units/:id/send', async (req, reply) =>
+  app.post('/api/threads/:id/send', async (req, reply) =>
     handle(reply, () => {
-      engine.sendDrafts((req.params as { id: string }).id);
-      return reply.code(202).send({ accepted: true });
+      const { id } = req.params as { id: string };
+      engine.sendThread(id);
+      return reply.code(202).send(engine.getThread(id));
     }),
   );
 
@@ -92,27 +92,6 @@ export function registerUnitRoutes(
       const { id } = req.params as { id: string };
       engine.retry(id);
       return reply.code(202).send(engine.getThread(id));
-    }),
-  );
-
-  app.post('/api/threads/:id/resolve', async (req, reply) =>
-    handle(reply, () => {
-      const { id } = req.params as { id: string };
-      engine.checkResolvable(id);
-      engine.resolve(id).catch((e) => req.log.error(e));
-      return reply.code(202).send(engine.getThread(id));
-    }),
-  );
-
-  app.put('/api/threads/:id/conclusion', async (req, reply) =>
-    handle(reply, () => {
-      const { id } = req.params as { id: string };
-      const body = (req.body ?? {}) as { conclusion?: unknown };
-      if (body.conclusion !== null && typeof body.conclusion !== 'string') {
-        throw new ValidationError('conclusion must be a string or null');
-      }
-      engine.setConclusion(id, body.conclusion);
-      return engine.getThread(id);
     }),
   );
 
@@ -156,32 +135,12 @@ export function registerUnitRoutes(
       .send(fs.createReadStream(image.file));
   });
 
-  app.post('/api/units/:id/submit', async (req, reply) =>
-    handle(reply, async () => {
+  app.post('/api/units/:id/integrate', async (req, reply) =>
+    handle(reply, () => {
       const { id } = req.params as { id: string };
-      const unit = store.get(id);
-      if (!unit) throw new NotFoundError('unit not found');
-      if (!engine.canSubmit(id)) throw new ConflictError('unit cannot be submitted: open threads remain or unit is not open');
-      const bundle = buildConclusionBundle(unit);
-      const file = conclusionFile(id);
-      fs.writeFileSync(file, bundle);
-      // Mark submitted before any await so a concurrent submit gets 409.
-      unit.status = 'submitted';
-      unit.delivered = false;
-      unit.conclusionsPath = file;
-      store.save(unit);
-      bus.emit({ type: 'unit.updated', unitId: id, sessionId: unit.sessionId });
-      let queued = false;
-      if (unit.agent === 'codex') {
-        // Best effort: the UI always offers a copy button too; a queue failure never fails the submit.
-        const instruction = codexInstruction(file);
-        queued = await codexQueue(unit.sessionId, instruction).catch(() => false);
-        const fresh = store.get(id) ?? unit;
-        fresh.delivery = { queued, instruction };
-        store.save(fresh);
-        bus.emit({ type: 'unit.updated', unitId: id, sessionId: fresh.sessionId });
-      }
-      return { bundle, queued };
+      if (!store.get(id)) throw new NotFoundError('unit not found');
+      engine.integrate(id);
+      return reply.code(202).send({ accepted: true });
     }),
   );
 }

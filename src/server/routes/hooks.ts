@@ -153,7 +153,9 @@ export function registerHookRoutes(
       for (const prev of store.listBySession(sessionId)) {
         if (prev.status !== 'open') continue;
         prev.status = 'stale';
-        for (const t of prev.threads) if (t.status !== 'resolved') t.status = 'expired';
+        delete prev.integrating;
+        // Answers stay readable as they were; only unsent and unfinished threads end here.
+        for (const t of prev.threads) if (t.status === 'draft' || t.status === 'answering') t.status = 'expired';
         store.save(prev);
         staled.push(prev);
       }
@@ -243,11 +245,14 @@ export function registerHookRoutes(
       const latestOpen = units
         .filter((u) => u.status === 'open')
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-      const n = latestOpen ? latestOpen.threads.filter((t) => t.status !== 'resolved').length : 0;
+      if (latestOpen?.integrating) {
+        return { action: 'block', reason: 'Agent Console: the review conclusions are being integrated. Wait for them before continuing.' };
+      }
+      const n = latestOpen ? latestOpen.threads.filter((t) => t.status === 'answering').length : 0;
       if (n > 0) {
         return {
           action: 'block',
-          reason: `Agent Console: ${n} review thread(s) still open. Finish them (or delete drafts) before continuing.`,
+          reason: `Agent Console: ${n} review thread(s) still being answered. Wait for them before continuing.`,
         };
       }
     }

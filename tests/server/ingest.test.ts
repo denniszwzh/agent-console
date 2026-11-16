@@ -70,7 +70,7 @@ describe('stop hook ingestion', () => {
     expect(sessions.json()[0].sessionId).toBe('sess-1');
   });
 
-  it('new unit marks previous open unit stale and its unresolved threads expired', async () => {
+  it('new unit marks previous open unit stale and expires only its unsent and unfinished threads', async () => {
     const store = new UnitStore();
     const bus = new EventBus();
     const app = buildApp({ store, token: TOKEN, port: PORT, bus });
@@ -88,7 +88,8 @@ describe('stop hook ingestion', () => {
       noConclusion: false,
       anchor: { sourceId: 's', blockId: 'b', quote: '', headingPath: [], startLine: 1, endLine: 1 },
     });
-    u.threads = [mkThread('t1', 'awaiting'), mkThread('t2', 'resolved')];
+    u.threads = [mkThread('t1', 'awaiting'), mkThread('t2', 'resolved'), mkThread('t3', 'draft'), mkThread('t4', 'answering')];
+    u.integrating = true;
     store.save(u);
 
     const events: ServerEvent[] = [];
@@ -97,7 +98,8 @@ describe('stop hook ingestion', () => {
 
     const old = store.get(first)!;
     expect(old.status).toBe('stale');
-    expect(old.threads.map((t) => t.status)).toEqual(['expired', 'resolved']);
+    expect(old.threads.map((t) => t.status)).toEqual(['awaiting', 'resolved', 'expired', 'expired']);
+    expect(old.integrating).toBeUndefined();
     expect(store.get(second)!.status).toBe('open');
     expect(events).toContainEqual({ type: 'unit.updated', unitId: first, sessionId: 'sess-1' });
     expect(events).toContainEqual({ type: 'unit.created', unitId: second, sessionId: 'sess-1' });

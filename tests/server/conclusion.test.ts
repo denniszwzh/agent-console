@@ -6,7 +6,8 @@ import { buildApp } from '../../src/server/app.js';
 import { buildConclusionBundle } from '../../src/server/conclusion.js';
 import { EventBus } from '../../src/server/events.js';
 import { UnitStore } from '../../src/server/store.js';
-import { ThreadEngine } from '../../src/server/threads.js';
+import { submitUnit } from '../../src/server/submit.js';
+import { ConflictError, NotFoundError, ThreadEngine } from '../../src/server/threads.js';
 import type { ReviewUnit, Thread } from '../../src/shared/types.js';
 
 const TOKEN = 't';
@@ -137,24 +138,23 @@ function setup(hardGate = false) {
   return { store, app };
 }
 
-describe('submit route', () => {
-  it('404 for missing, 409 with unresolved threads, 409 when not open', async () => {
-    const { store, app } = setup();
-    expect((await app.inject({ method: 'POST', url: '/api/units/nope/submit', headers })).statusCode).toBe(404);
-    store.save(unit({ threads: [thread('a', { status: 'awaiting' })] }));
-    expect((await app.inject({ method: 'POST', url: '/api/units/u1/submit', headers })).statusCode).toBe(409);
+describe('submitUnit', () => {
+  const deps = (store: UnitStore) => ({ store, bus: new EventBus(), codexQueue: async () => false });
+
+  it('rejects a missing or non-open unit', async () => {
+    const store = new UnitStore();
+    await expect(submitUnit(deps(store), 'nope')).rejects.toBeInstanceOf(NotFoundError);
     store.save(unit({ status: 'stale', threads: [thread('a')] }));
-    expect((await app.inject({ method: 'POST', url: '/api/units/u1/submit', headers })).statusCode).toBe(409);
+    await expect(submitUnit(deps(store), 'u1')).rejects.toBeInstanceOf(ConflictError);
   });
 
   it('writes the bundle file and marks the unit submitted', async () => {
-    const { store, app } = setup();
+    const store = new UnitStore();
     store.save(unit({ threads: [thread('a')] }));
-    const res = await app.inject({ method: 'POST', url: '/api/units/u1/submit', headers });
-    expect(res.statusCode).toBe(200);
+    const res = await submitUnit(deps(store), 'u1');
     const file = join(home, 'conclusions', 'u1.md');
     expect(existsSync(file)).toBe(true);
-    expect(readFileSync(file, 'utf8')).toBe(res.json().bundle);
+    expect(readFileSync(file, 'utf8')).toBe(res.bundle);
     const saved = store.get('u1')!;
     expect(saved.status).toBe('submitted');
     expect(saved.delivered).toBe(false);
@@ -207,17 +207,32 @@ describe('prompt hook', () => {
 
   it('hardGate false never blocks', async () => {
     const off = setup(false);
-    off.store.save(unit({ threads: [thread('a', { status: 'draft' }), thread('b', { status: 'awaiting' })] }));
+    off.store.save(unit({ threads: [thread('a', { status: 'answering' })], integrating: true }));
     expect((await prompt(off.app)).json()).toEqual({ action: 'none' });
   });
 
-  it('blocks with the unresolved count when hardGate is on', async () => {
+  it('blocks while threads are being answered when hardGate is on', async () => {
     const on = setup(true);
-    on.store.save(unit({ threads: [thread('a', { status: 'draft' }), thread('b', { status: 'awaiting' }), thread('c')] }));
+    on.store.save(unit({ threads: [thread('a', { status: 'answering' }), thread('b', { status: 'answering' }), thread('c', { status: 'awaiting' })] }));
     expect((await prompt(on.app)).json()).toEqual({
       action: 'block',
-      reason: 'Agent Console: 2 review thread(s) still open. Finish them (or delete drafts) before continuing.',
+      reason: 'Agent Console: 2 review thread(s) still being answered. Wait for them before continuing.',
     });
+  });
+
+  it('blocks while conclusions are being integrated when hardGate is on', async () => {
+    const on = setup(true);
+    on.store.save(unit({ threads: [thread('a', { status: 'awaiting' })], integrating: true }));
+    expect((await prompt(on.app)).json()).toEqual({
+      action: 'block',
+      reason: 'Agent Console: the review conclusions are being integrated. Wait for them before continuing.',
+    });
+  });
+
+  it('does not block for answered threads and drafts', async () => {
+    const on = setup(true);
+    on.store.save(unit({ threads: [thread('a', { status: 'awaiting' }), thread('b', { status: 'draft' })] }));
+    expect((await prompt(on.app)).json()).toEqual({ action: 'none' });
   });
 
   it('does not block when all threads are resolved', async () => {

@@ -72,8 +72,8 @@ describe('every /api route requires the token (final review item 13)', () => {
           'GET /api/units/:id',
           'POST /api/hooks/claude/stop',
           'POST /api/hooks/claude/prompt/ack',
-          'POST /api/units/:id/submit',
-          'PUT /api/threads/:id/conclusion',
+          'POST /api/units/:id/integrate',
+          'POST /api/threads/:id/send',
           'GET /api/units/:id/image',
         ]),
       );

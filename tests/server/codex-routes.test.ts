@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../../src/server/app.js';
 import { EventBus } from '../../src/server/events.js';
 import { UnitStore } from '../../src/server/store.js';
-import { ThreadEngine } from '../../src/server/threads.js';
+import { submitUnit } from '../../src/server/submit.js';
+import { ConflictError, ThreadEngine } from '../../src/server/threads.js';
 import type { ReviewUnit, Thread } from '../../src/shared/types.js';
 
 const TOKEN = 'secret-token';
@@ -101,10 +102,8 @@ describe('POST /api/hooks/codex/stop', () => {
 describe('submit for a codex unit', () => {
   function setup(queue: (thread: string, msg: string) => Promise<boolean>) {
     const store = new UnitStore();
-    const bus = new EventBus();
-    const engine = new ThreadEngine(store, bus, {}, 3, { gitStatus: async () => null });
-    const app = buildApp({ store, token: TOKEN, port: PORT, bus, engine, codexQueue: queue });
-    return { store, app };
+    const submit = () => submitUnit({ store, bus: new EventBus(), codexQueue: queue }, 'u1');
+    return { store, submit };
   }
   const unit = (agent: 'claude' | 'codex'): ReviewUnit => ({
     id: 'u1',
@@ -135,57 +134,54 @@ describe('submit for a codex unit', () => {
 
   it('queues the instruction and records queued: true', async () => {
     const calls: Array<[string, string]> = [];
-    const { store, app } = setup(async (t, m) => {
+    const { store, submit } = setup(async (t, m) => {
       calls.push([t, m]);
       return true;
     });
     store.save(unit('codex'));
-    const res = await app.inject({ method: 'POST', url: '/api/units/u1/submit', headers });
-    expect(res.statusCode).toBe(200);
-    expect(res.json().queued).toBe(true);
+    const res = await submit();
+    expect(res.queued).toBe(true);
     const file = join(home, 'conclusions', 'u1.md');
     expect(existsSync(file)).toBe(true);
     expect(calls).toEqual([['thr-9', `Read the review conclusions in ${file} and apply them.`]]);
     expect(store.get('u1')).toMatchObject({ status: 'submitted', delivery: { queued: true, instruction: calls[0][1] } });
-    expect(readFileSync(file, 'utf8')).toBe(res.json().bundle);
+    expect(readFileSync(file, 'utf8')).toBe(res.bundle);
   });
 
   it('still submits when the queue fails or throws', async () => {
     for (const queue of [async () => false, async () => Promise.reject(new Error('x'))]) {
-      const { store, app } = setup(queue);
+      const { store, submit } = setup(queue);
       store.save(unit('codex'));
-      const res = await app.inject({ method: 'POST', url: '/api/units/u1/submit', headers });
-      expect(res.statusCode).toBe(200);
-      expect(res.json().queued).toBe(false);
+      const res = await submit();
+      expect(res.queued).toBe(false);
       expect(store.get('u1')!.delivery?.queued).toBe(false);
       expect(store.get('u1')!.status).toBe('submitted');
     }
   });
 
-  it('marks the unit submitted before awaiting the queue: a concurrent submit gets 409', async () => {
+  it('marks the unit submitted before awaiting the queue: a concurrent submit is refused', async () => {
     let release!: (v: boolean) => void;
-    const { store, app } = setup(() => new Promise<boolean>((r) => (release = r)));
+    const { store, submit } = setup(() => new Promise<boolean>((r) => (release = r)));
     store.save(unit('codex'));
-    const first = app.inject({ method: 'POST', url: '/api/units/u1/submit', headers });
-    await new Promise((r) => setTimeout(r, 100));
+    const first = submit();
+    await new Promise((r) => setTimeout(r, 20));
     expect(store.get('u1')!.status).toBe('submitted');
-    expect((await app.inject({ method: 'POST', url: '/api/units/u1/submit', headers })).statusCode).toBe(409);
+    await expect(submit()).rejects.toBeInstanceOf(ConflictError);
     release(true);
     const res = await first;
-    expect(res.statusCode).toBe(200);
-    expect(res.json().queued).toBe(true);
+    expect(res.queued).toBe(true);
     expect(store.get('u1')!.delivery?.queued).toBe(true);
   });
 
   it('does not touch the queue for a claude unit', async () => {
     let called = false;
-    const { store, app } = setup(async () => {
+    const { store, submit } = setup(async () => {
       called = true;
       return true;
     });
     store.save(unit('claude'));
-    const res = await app.inject({ method: 'POST', url: '/api/units/u1/submit', headers });
-    expect(res.json().queued).toBe(false);
+    const res = await submit();
+    expect(res.queued).toBe(false);
     expect(called).toBe(false);
     expect(store.get('u1')!.delivery).toBeUndefined();
   });

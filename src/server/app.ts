@@ -12,6 +12,7 @@ import { ActivityTracker } from './activity.js';
 import { createCodexQueueRunner, type CodexQueueRunner } from '../agents/codex.js';
 import { registerHookRoutes, type TurnScanner } from './routes/hooks.js';
 import { registerUnitRoutes } from './routes/units.js';
+import { submitUnit } from './submit.js';
 import type { ThreadEngine } from './threads.js';
 import { readConfig } from './paths.js';
 import { SessionMetaService, defaultSessionMetaOptions } from './session-meta.js';
@@ -193,7 +194,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
 
     registerHookRoutes(api, { store, bus, config: deps.config ?? readConfig(), forks: deps.forks ?? deps.engine, activity, scanFiles: deps.scanFiles });
-    if (deps.engine) registerUnitRoutes(api, { engine: deps.engine, store, bus, codexQueue: deps.codexQueue ?? createCodexQueueRunner() });
+    if (deps.engine) {
+      const codexQueue = deps.codexQueue ?? createCodexQueueRunner();
+      deps.engine.setSubmitter((unitId) => submitUnit({ store, bus, codexQueue }, unitId));
+      registerUnitRoutes(api, { engine: deps.engine, store, bus, codexQueue });
+    }
   });
 
   // The built UI is public (it holds no data); every /api call still needs the token.

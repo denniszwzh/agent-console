@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentAdapter, AgentEvent } from '../agents/adapter.js';
 import { splitBlocks } from '../shared/blocks.js';
-import { canSubmit as canSubmitUnit } from '../shared/gate.js';
+import { integrationState, isExcluded } from '../shared/gate.js';
 import type { AgentKind, Anchor, Message, ReviewUnit, Thread } from '../shared/types.js';
 import type { EventBus } from './events.js';
 import { changedPaths, defaultGitStatus, defaultStat, fingerprint, type Fingerprints, type GitStatusProbe, type StatFn } from './postcheck.js';
@@ -39,8 +39,10 @@ export class ThreadEngine {
   private active = 0;
   private waiting: (() => void)[] = [];
   private inflight = new Set<Promise<void>>();
-  /** Threads whose last failure happened in an answer run (not the conclusion run). */
-  private answerFailed = new Set<string>();
+  /** unitId -> conclusion runs queued or running for it. */
+  private concluding = new Map<string, number>();
+  /** Hands an integrated unit back to the main session (writes the bundle, marks it submitted). */
+  private submitter?: (unitId: string) => Promise<unknown>;
   /** threadId -> abort controller of its in-flight run. */
   private runs = new Map<string, AbortController>();
   private runTimeoutMs: number;
@@ -59,6 +61,13 @@ export class ThreadEngine {
     for (const s of store.listSessions()) {
       for (const u of store.listBySession(s.sessionId)) {
         let dirty = false;
+        // An integration does not survive a restart: its conclusion runs are gone.
+        if (u.status === 'open' && u.integrating) {
+          for (const t of u.threads) if (t.status === 'answering') t.status = 'awaiting';
+          u.integrating = false;
+          u.integrationError = 'Interrupted by server restart';
+          dirty = true;
+        }
         for (const t of u.threads) {
           this.threadUnit.set(t.id, u.id);
           if (t.sessionId) this.forkSessions.add(t.sessionId);
@@ -94,14 +103,16 @@ export class ThreadEngine {
     return this.locate(threadId).thread;
   }
 
-  canSubmit(unitId: string): boolean {
-    return canSubmitUnit(this.loadUnit(unitId));
+  setSubmitter(fn: (unitId: string) => Promise<unknown>): void {
+    this.submitter = fn;
   }
 
   // ---- actions -------------------------------------------------------------
 
+  /** Creates an unsent thread; `ask` sends it at once. */
   addDraft(unitId: string, anchor: Anchor, question: string, parentThreadId?: string): Thread {
     const unit = this.openUnit(unitId);
+    this.assertNotIntegrating(unit);
     let forkFrom = unit.sessionId;
     if (parentThreadId) {
       const parent = unit.threads.find((t) => t.id === parentThreadId);
@@ -132,27 +143,43 @@ export class ThreadEngine {
   deleteDraft(threadId: string): void {
     const { unit, thread } = this.locate(threadId);
     this.assertOpen(unit);
+    this.assertNotIntegrating(unit);
     if (thread.status !== 'draft') throw new ConflictError('only draft threads can be deleted');
     unit.threads = unit.threads.filter((t) => t.id !== threadId);
     this.threadUnit.delete(threadId);
     this.persist(unit);
   }
 
-  sendDrafts(unitId: string): void {
-    const unit = this.openUnit(unitId);
-    const drafts = unit.threads.filter((t) => t.status === 'draft');
-    if (!drafts.length) return;
-    for (const t of drafts) t.status = 'answering';
-    this.persist(unit);
-    for (const t of drafts) {
-      const prompt = questionPrompt(t.anchor, this.sourceLabel(unit, t.anchor), t.messages[0].content);
-      this.enqueue(t.id, () => this.runAnswer(t.id, prompt, true));
+  /** Creates a thread and sends it at once: its fork starts answering right away. */
+  ask(unitId: string, anchor: Anchor, question: string, parentThreadId?: string): Thread {
+    if (parentThreadId) {
+      const parent = this.openUnit(unitId).threads.find((t) => t.id === parentThreadId);
+      // Forking the parent's session while it is still writing would branch from a half-written turn.
+      if (parent?.status === 'answering') throw new ConflictError('parent thread is busy');
     }
+    const thread = this.addDraft(unitId, anchor, question, parentThreadId);
+    this.sendThread(thread.id);
+    return this.getThread(thread.id);
+  }
+
+  /** Sends one unsent thread (a draft left from before questions were sent at once). */
+  sendThread(threadId: string): void {
+    const { unit, thread } = this.locate(threadId);
+    this.assertOpen(unit);
+    this.assertNotIntegrating(unit);
+    if (thread.status !== 'draft') throw new ConflictError('only unsent threads can be sent');
+    // The parent gains an answered child: it and every concluded ancestor must be concluded again.
+    this.reopenChain(unit, thread.parentThreadId);
+    thread.status = 'answering';
+    this.persist(unit);
+    const prompt = questionPrompt(thread.anchor, this.sourceLabel(unit, thread.anchor), thread.messages[0].content);
+    this.enqueue(threadId, () => this.runAnswer(threadId, prompt, true));
   }
 
   followUp(threadId: string, text: string): void {
     const { unit, thread } = this.locate(threadId);
     this.assertOpen(unit);
+    this.assertNotIntegrating(unit);
     if (!thread.sessionId) throw new ConflictError('thread has no session yet');
     if (thread.status === 'draft' || thread.status === 'answering') throw new ConflictError('thread is busy');
     thread.messages.push(this.userMessage(text));
@@ -168,15 +195,9 @@ export class ThreadEngine {
   retry(threadId: string): void {
     const { unit, thread } = this.locate(threadId);
     this.assertOpen(unit);
+    this.assertNotIntegrating(unit);
     if (thread.status !== 'error') throw new ConflictError('only threads in error can be retried');
     this.reopenChain(unit, thread.parentThreadId);
-    const lastMsg = thread.messages[thread.messages.length - 1];
-    if (lastMsg?.role === 'assistant' && thread.sessionId && !this.answerFailed.has(threadId)) {
-      // The failure happened in the conclusion run: re-run it.
-      this.startConclusion(unit, thread);
-      return;
-    }
-    this.answerFailed.delete(threadId);
     const users = thread.messages.filter((m) => m.role === 'user');
     const last = users[users.length - 1];
     if (!last) throw new ConflictError('thread has no user message');
@@ -189,48 +210,131 @@ export class ThreadEngine {
     this.enqueue(threadId, () => this.runAnswer(threadId, prompt, fork));
   }
 
-  /** Throws ConflictError when the thread cannot be resolved right now. */
-  checkResolvable(threadId: string): void {
-    const { unit, thread } = this.locate(threadId);
-    this.assertOpen(unit);
-    if (!thread.sessionId) throw new ConflictError('thread has no session yet');
-    if (thread.status === 'draft' || thread.status === 'answering') throw new ConflictError('thread is busy');
-    if (this.hasOpenChildren(unit, threadId)) throw new ConflictError('child threads must be resolved first');
-  }
-
-  async resolve(threadId: string): Promise<void> {
-    this.checkResolvable(threadId);
-    const { unit, thread } = this.locate(threadId);
-    await this.startConclusion(unit, thread);
-  }
-
-  private startConclusion(unit: ReviewUnit, thread: Thread): Promise<void> {
-    const childConclusions = unit.threads
-      .filter((t) => t.parentThreadId === thread.id && t.conclusion)
-      .map((t) => t.conclusion as string);
-    thread.status = 'answering';
-    delete thread.error;
+  /**
+   * Starts integrating the unit's conclusions: every answered thread gets a one-line conclusion
+   * (children before their parents), then the unit is submitted. Failed and unsent threads are left out.
+   */
+  integrate(unitId: string): void {
+    const unit = this.openUnit(unitId);
+    this.assertNotIntegrating(unit);
+    const state = integrationState(unit);
+    if (!state.canIntegrate) {
+      throw new ConflictError(state.answering > 0 ? 'threads are still being answered' : 'no answered thread to integrate');
+    }
+    unit.integrating = true;
+    delete unit.integrationError;
     this.persist(unit);
-    return this.enqueue(thread.id, () => this.runConclusion(thread.id, conclusionPrompt(childConclusions)));
-  }
-
-  setConclusion(threadId: string, conclusion: string | null): void {
-    const { unit, thread } = this.locate(threadId);
-    this.assertOpen(unit);
-    if (thread.status === 'answering') throw new ConflictError('thread is busy');
-    if (thread.status === 'draft') throw new ConflictError('draft threads cannot be concluded');
-    if (this.hasOpenChildren(unit, threadId)) throw new ConflictError('child threads must be resolved first');
-    thread.conclusion = conclusion;
-    thread.noConclusion = conclusion === null;
-    thread.status = 'resolved';
-    delete thread.error;
-    this.persist(unit);
+    this.advance(unitId);
   }
 
   // ---- internals -----------------------------------------------------------
 
+  /** Children still to be concluded; failed and unsent children are left out and do not block. */
   private hasOpenChildren(unit: ReviewUnit, threadId: string): boolean {
-    return unit.threads.some((t) => t.parentThreadId === threadId && t.status !== 'resolved');
+    return unit.threads.some((t) => t.parentThreadId === threadId && (t.status === 'awaiting' || t.status === 'answering'));
+  }
+
+  private assertNotIntegrating(unit: ReviewUnit): void {
+    if (unit.integrating) throw new ConflictError('conclusions are being integrated');
+  }
+
+  /** Next step of an integration: start the conclusions that are ready, or submit when all are done. */
+  private advance(unitId: string): void {
+    const unit = this.store.get(unitId);
+    if (!unit || unit.status !== 'open' || !unit.integrating) return;
+    const running = this.concluding.get(unitId) ?? 0;
+    if (unit.integrationError !== undefined) {
+      // A conclusion failed: start nothing new, and end once the runs still going have finished.
+      if (running === 0) {
+        unit.integrating = false;
+        this.persist(unit);
+      }
+      return;
+    }
+    const pending = unit.threads.filter((t) => !isExcluded(t) && t.status !== 'resolved');
+    if (pending.length === 0) {
+      if (running > 0) return;
+      unit.integrating = false;
+      this.persist(unit);
+      this.submit(unitId);
+      return;
+    }
+    const ready = pending.filter((t) => t.status === 'awaiting' && !this.hasOpenChildren(unit, t.id));
+    if (ready.length === 0 && running === 0) {
+      unit.integrating = false;
+      unit.integrationError = 'Nothing left that can be concluded';
+      this.persist(unit);
+      return;
+    }
+    for (const t of ready) this.startConclusion(unit, t);
+  }
+
+  private startConclusion(unit: ReviewUnit, thread: Thread): void {
+    const childConclusions = unit.threads
+      .filter((t) => t.parentThreadId === thread.id && t.status === 'resolved' && t.conclusion)
+      .map((t) => t.conclusion as string);
+    thread.status = 'answering';
+    delete thread.error;
+    this.persist(unit);
+    this.concluding.set(unit.id, (this.concluding.get(unit.id) ?? 0) + 1);
+    const unitId = unit.id;
+    const threadId = thread.id;
+    // Never throws: a failed conclusion returns its thread to answered instead of to error.
+    this.enqueue(threadId, async () => {
+      let error: string | undefined;
+      try {
+        error = await this.runConclusion(threadId, conclusionPrompt(childConclusions));
+      } catch (e) {
+        error = (e as Error).message;
+      }
+      this.afterConclusion(unitId, threadId, error);
+    });
+  }
+
+  private afterConclusion(unitId: string, threadId: string, error: string | undefined): void {
+    const left = (this.concluding.get(unitId) ?? 1) - 1;
+    if (left > 0) this.concluding.set(unitId, left);
+    else this.concluding.delete(unitId);
+    const unit = this.store.get(unitId);
+    if (!unit || unit.status !== 'open') return;
+    const thread = unit.threads.find((t) => t.id === threadId);
+    if (error !== undefined || thread?.status !== 'resolved') {
+      if (thread && thread.status === 'answering') thread.status = 'awaiting';
+      if (unit.integrating && unit.integrationError === undefined) unit.integrationError = error ?? 'Conclusion failed';
+      this.persist(unit);
+    }
+    this.advance(unitId);
+  }
+
+  /** Hands the integrated unit to the submitter; tracked so whenIdle waits for it. */
+  private submit(unitId: string): void {
+    const fail = (message: string) =>
+      this.mutateUnit(unitId, (u) => {
+        if (u.status === 'open') u.integrationError = message;
+      });
+    if (!this.submitter) {
+      fail('No way to submit the conclusions');
+      return;
+    }
+    let p: Promise<void>;
+    try {
+      p = this.submitter(unitId).then(
+        () => {},
+        (e: unknown) => fail((e as Error).message),
+      );
+    } catch (e) {
+      fail((e as Error).message);
+      return;
+    }
+    const tracked: Promise<void> = p.finally(() => this.inflight.delete(tracked));
+    this.inflight.add(tracked);
+  }
+
+  private mutateUnit(unitId: string, fn: (u: ReviewUnit) => void): void {
+    const unit = this.store.get(unitId);
+    if (!unit) return;
+    fn(unit);
+    this.persist(unit);
   }
 
   /**
@@ -348,10 +452,7 @@ export class ThreadEngine {
     // The unit may have been superseded while this job waited for a slot.
     if (unit.status !== 'open' || thread.status === 'expired') return;
     const adapter = this.adapters[unit.agent];
-    if (!adapter) {
-      this.fail(threadId, `No adapter for agent '${unit.agent}' yet`);
-      return;
-    }
+    if (!adapter) throw new Error(`No adapter for agent '${unit.agent}' yet`);
     const parentSessionId = fork ? thread.forkFromSessionId : (thread.sessionId as string);
     const ctl = new AbortController();
     this.runs.set(threadId, ctl);
@@ -418,8 +519,6 @@ export class ThreadEngine {
         m.blocks = splitBlocks(content, 'markdown');
       });
     };
-    // Any way this run fails (error event, throw, timeout) counts as an answer failure.
-    this.answerFailed.add(threadId);
     await this.runAgent(threadId, prompt, fork, (ev) => {
       if (finished) return;
       if (ev.type === 'session') {
@@ -432,7 +531,6 @@ export class ThreadEngine {
         setContent(texts.join('\n\n'));
       } else if (ev.type === 'done') {
         finished = true;
-        this.answerFailed.delete(threadId);
         setContent(ev.finalText);
         this.mutateStatus(threadId, (t) => {
           t.status = 'awaiting';
@@ -447,8 +545,10 @@ export class ThreadEngine {
     }
   }
 
-  private async runConclusion(threadId: string, prompt: string): Promise<void> {
+  /** Runs one conclusion; returns the error message when it did not produce one. */
+  private async runConclusion(threadId: string, prompt: string): Promise<string | undefined> {
     let finished = false;
+    let error: string | undefined;
     await this.runAgent(threadId, prompt, false, (ev) => {
       if (finished) return;
       if (ev.type === 'session') {
@@ -470,11 +570,10 @@ export class ThreadEngine {
         });
       } else if (ev.type === 'error') {
         finished = true;
-        this.fail(threadId, ev.message);
+        error = ev.message;
       }
     });
-    if (!finished && this.getThread(threadId).status === 'answering') {
-      this.fail(threadId, 'Agent ended without a conclusion');
-    }
+    if (!finished) return 'Agent ended without a conclusion';
+    return error;
   }
 }
