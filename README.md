@@ -29,7 +29,7 @@ Nothing else is needed: every dependency comes from the public npm registry, and
 ### 1. Clone and build
 
 ```
-git clone <repository-url> agent-console
+git clone https://github.com/denniszwzh/agent-console.git
 cd agent-console
 npm install
 ```
@@ -272,3 +272,7 @@ instruction with a copy button; paste it into Codex if the next turn did not pic
 - Managed (policy) Claude settings outrank the fork's own settings; a managed `disableAllHooks` would turn the guard off.
 - Images are served from the live file (binary files are not snapshotted).
 - No CLI version check at startup.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

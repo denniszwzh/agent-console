@@ -7,9 +7,16 @@
     "node": ">=22"
   },
   "description": "Local review panel for Claude Code and Codex CLI replies: ask about any passage in a read-only fork, then send the conclusions back.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/denniszwzh/agent-console.git"
+  },
+  "homepage": "https://github.com/denniszwzh/agent-console#readme",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.web.json && vite build",
