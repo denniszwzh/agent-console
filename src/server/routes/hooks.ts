@@ -13,7 +13,7 @@ import type { UnitStore } from '../store.js';
 import type { ForkRegistry } from '../app.js';
 import { buildConclusionBundle } from '../conclusion.js';
 import { conclusionFile, pathKey } from '../paths.js';
-import type { ActivityTracker } from '../activity.js';
+import { acceptableTranscriptPath, type ActivityTracker } from '../activity.js';
 import { MAX_SCAN_FILES, scanTurnFiles, type TurnScan } from '../turn-files.js';
 
 export type TurnScanner = (cwd: string, sinceMs: number) => Promise<TurnScan | null>;
@@ -127,6 +127,7 @@ export function registerHookRoutes(
         delivered: false,
         warnings: [],
         ...(scanNotice ? { scanNotice } : {}),
+        ...(acceptableTranscriptPath(transcriptPath) ? { transcriptPath } : {}),
       };
 
       // Supersede earlier open units of this session before the new one exists.

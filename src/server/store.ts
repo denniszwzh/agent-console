@@ -11,6 +11,7 @@ interface IndexEntry {
   createdAt: string;
   agent: AgentKind;
   cwd: string;
+  transcriptPath?: string;
 }
 
 export class UnitStore {
@@ -42,7 +43,7 @@ export class UnitStore {
   private indexUnit(u: ReviewUnit): void {
     const prev = this.index.get(u.id);
     if (prev && prev.sessionId !== u.sessionId) this.bySession.get(prev.sessionId)?.delete(u.id);
-    this.index.set(u.id, { sessionId: u.sessionId, createdAt: u.createdAt, agent: u.agent, cwd: u.cwd });
+    this.index.set(u.id, { sessionId: u.sessionId, createdAt: u.createdAt, agent: u.agent, cwd: u.cwd, transcriptPath: u.transcriptPath });
     let ids = this.bySession.get(u.sessionId);
     if (!ids) this.bySession.set(u.sessionId, (ids = new Set()));
     ids.add(u.id);
@@ -118,6 +119,16 @@ export class UnitStore {
       if (u) return u;
     }
     return null;
+  }
+
+  /** Transcript path of the session's newest unit that has one. */
+  transcriptPathFor(sessionId: string): string | undefined {
+    const ids = this.sessionIdsByAge(sessionId);
+    for (let i = ids.length - 1; i >= 0; i--) {
+      const p = this.index.get(ids[i])?.transcriptPath;
+      if (p) return p;
+    }
+    return undefined;
   }
 
   listSessions(): SessionSummary[] {

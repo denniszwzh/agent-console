@@ -84,6 +84,8 @@ export interface ReviewUnit {
   warnings: { at: string; threadId: string; paths: string[] }[];
   /** Set when the end-of-turn scan left files out (over the per-turn cap) or did not finish its walk. */
   scanNotice?: { omitted: number; incomplete: boolean };
+  /** The agent's transcript (Claude) or rollout (Codex) as reported by the Stop hook; used to read the session name. */
+  transcriptPath?: string;
 }
 
 export interface Config {
@@ -100,6 +102,13 @@ export interface SessionSummary {
   agent: AgentKind;
   cwd: string;
   lastActivity: string;
+  /** The agent's own session name, or the first prompt when it has none (see titleSource). */
+  title?: string;
+  titleSource?: 'agent' | 'prompt';
+  /** When the session started (first transcript record). */
+  createdAt?: string;
+  /** Last time the session's transcript changed. */
+  lastModified?: string;
 }
 
 /** A main session that is working on a turn right now (GET /api/activity). */

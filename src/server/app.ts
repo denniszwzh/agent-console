@@ -13,7 +13,8 @@ import { registerHookRoutes, type TurnScanner } from './routes/hooks.js';
 import { registerUnitRoutes } from './routes/units.js';
 import type { ThreadEngine } from './threads.js';
 import { readConfig } from './paths.js';
-import type { Config } from '../shared/types.js';
+import { SessionMetaService, defaultSessionMetaOptions } from './session-meta.js';
+import type { Config, SessionSummary } from '../shared/types.js';
 
 /** Implemented by the thread engine so ingestion can skip sessions it forked itself. */
 export interface ForkRegistry {
@@ -36,6 +37,8 @@ export interface AppDeps {
   config?: Config;
   /** Sends a message to a Codex thread queue on submit; defaults to the real `codex queue`. */
   codexQueue?: CodexQueueRunner;
+  /** Reads session names and times from agent transcripts; defaults to the real ~/.claude and ~/.codex. */
+  sessionMeta?: SessionMetaService;
   /** Directory of the built web UI; defaults to <package>/dist/web. */
   webRoot?: string;
 }
@@ -80,10 +83,29 @@ function readCookie(header: string | undefined, name: string): string | null {
   return null;
 }
 
+/**
+ * Sessions with replies plus sessions responding before their first reply, each with its name and
+ * times from the agent's transcript, newest change first.
+ */
+function listSessions(store: UnitStore, activity: ActivityTracker, meta: SessionMetaService): SessionSummary[] {
+  const list = store.listSessions();
+  const known = new Set(list.map((s) => s.sessionId));
+  for (const a of activity.list()) {
+    if (!known.has(a.sessionId)) list.push({ sessionId: a.sessionId, agent: a.agent, cwd: a.cwd, lastActivity: a.since });
+  }
+  const out = list.map((s) => ({
+    ...s,
+    ...meta.describe(s.agent, s.sessionId, store.transcriptPathFor(s.sessionId) ?? activity.transcriptPathFor(s.sessionId)),
+  }));
+  const changed = (s: SessionSummary) => s.lastModified ?? s.lastActivity;
+  return out.sort((a, b) => changed(b).localeCompare(changed(a)));
+}
+
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { store, token, port } = deps;
   const bus = deps.bus ?? new EventBus();
   const activity = deps.activity ?? new ActivityTracker(bus);
+  const sessionMeta = deps.sessionMeta ?? new SessionMetaService(defaultSessionMetaOptions());
   const app = Fastify();
   const sseClients = new Set<ServerResponse>();
 
@@ -143,7 +165,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       req.raw.on('close', cleanup);
     });
 
-    api.get('/api/sessions', async () => store.listSessions());
+    api.get('/api/sessions', async () => listSessions(store, activity, sessionMeta));
 
     api.get('/api/activity', async () => activity.list());
 

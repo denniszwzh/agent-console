@@ -264,3 +264,19 @@ describe('stop hook ingestion', () => {
     });
   });
 });
+
+describe('stop hook transcript path', () => {
+  it('stores the transcript path on the unit', async () => {
+    const store = new UnitStore();
+    const app = buildApp({ store, token: TOKEN, port: PORT });
+    const { unitId } = (await stop(app)).json();
+    expect(store.get(unitId)!.transcriptPath).toBe(join(work, 't.jsonl'));
+    const rel = await app.inject({
+      method: 'POST',
+      url: '/api/hooks/claude/stop',
+      headers,
+      payload: { session_id: 'sess-2', transcript_path: 'relative.jsonl', cwd: work, last_assistant_message: 'x' },
+    });
+    expect(store.get(rel.json().unitId)!).not.toHaveProperty('transcriptPath');
+  });
+});
