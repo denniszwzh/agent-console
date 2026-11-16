@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { copyFileSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { appendFileSync, copyFileSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,7 +59,8 @@ describe('stop hook ingestion', () => {
     expect(unit.reply.blocks.length).toBeGreaterThan(0);
     expect(unit.files.map((f) => f.path)).toEqual(['a.md', 'b.ts']);
     expect(unit.files[0].content).toBe('# A\n\nhello\n');
-    expect(events).toEqual([{ type: 'unit.created', unitId, sessionId: 'sess-1' }]);
+    // The turn's prompts are added afterwards (unit.updated), whenever the transcript read finishes.
+    expect(events.filter((e) => e.type !== 'unit.updated')).toEqual([{ type: 'unit.created', unitId, sessionId: 'sess-1' }]);
 
     const got = await app.inject({ method: 'GET', url: `/api/units/${unitId}`, headers });
     expect(got.json().id).toBe(unitId);
@@ -278,5 +279,74 @@ describe('stop hook transcript path', () => {
       payload: { session_id: 'sess-2', transcript_path: 'relative.jsonl', cwd: work, last_assistant_message: 'x' },
     });
     expect(store.get(rel.json().unitId)!).not.toHaveProperty('transcriptPath');
+  });
+});
+
+describe('stop hook prompts', () => {
+  const T0 = Date.parse('2026-11-16T10:00:00.000Z');
+  const userLine = (text: string, at: string) => `${JSON.stringify({ type: 'user', timestamp: at, message: { role: 'user', content: text } })}\n`;
+  const stopWith = (app: ReturnType<typeof buildApp>, transcript: string | undefined) =>
+    app.inject({
+      method: 'POST',
+      url: '/api/hooks/claude/stop',
+      headers,
+      payload: { session_id: 'sess-p', cwd: work, last_assistant_message: 'reply', ...(transcript ? { transcript_path: transcript } : {}) },
+    });
+  const promptsOf = async (store: UnitStore, unitId: string) => {
+    await vi.waitFor(() => expect(store.get(unitId)!.prompts).toBeDefined());
+    return store.get(unitId)!.prompts!.map((p) => p.text);
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('stores the turn prompt on the first unit', async () => {
+    const t = join(work, 'p.jsonl');
+    writeFileSync(t, userLine('A', '2026-11-16T09:00:00.000Z') + userLine('B', '2026-11-16T09:30:00.000Z'));
+    const store = new UnitStore();
+    const bus = new EventBus();
+    const events: ServerEvent[] = [];
+    bus.subscribe((e) => events.push(e));
+    const { unitId } = (await stopWith(buildApp({ store, token: TOKEN, port: PORT, bus }), t)).json();
+    expect(await promptsOf(store, unitId)).toEqual(['B']);
+    expect(events).toContainEqual({ type: 'unit.updated', unitId, sessionId: 'sess-p' });
+  });
+
+  it('stores prompts since the previous unit', async () => {
+    const t = join(work, 'p.jsonl');
+    writeFileSync(t, userLine('A', '2026-11-16T09:00:00.000Z'));
+    const store = new UnitStore();
+    const app = buildApp({ store, token: TOKEN, port: PORT });
+    const first = (await stopWith(app, t)).json().unitId as string;
+    expect(await promptsOf(store, first)).toEqual(['A']);
+    vi.setSystemTime(T0 + 60_000);
+    appendFileSync(t, userLine('C', '2026-11-16T10:00:20.000Z') + userLine('D', '2026-11-16T10:00:40.000Z'));
+    const second = (await stopWith(app, t)).json().unitId as string;
+    expect(await promptsOf(store, second)).toEqual(['C', 'D']);
+  });
+
+  it('creates the unit before reading prompts', async () => {
+    const t = join(work, 'later.jsonl');
+    const store = new UnitStore();
+    const bus = new EventBus();
+    const events: ServerEvent[] = [];
+    bus.subscribe((e) => events.push(e));
+    const res = await stopWith(buildApp({ store, token: TOKEN, port: PORT, bus }), t);
+    expect(res.statusCode).toBe(200);
+    const { unitId } = res.json();
+    expect(events[0]).toEqual({ type: 'unit.created', unitId, sessionId: 'sess-p' });
+    expect(await promptsOf(store, unitId)).toEqual([]);
+  });
+
+  it('leaves prompts unset without a transcript path', async () => {
+    const store = new UnitStore();
+    const { unitId } = (await stopWith(buildApp({ store, token: TOKEN, port: PORT }), undefined)).json();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(store.get(unitId)!.prompts).toBeUndefined();
   });
 });
