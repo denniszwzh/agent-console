@@ -1,4 +1,5 @@
 import type { Anchor, ReviewUnit, ServerEvent, SessionActivity, SessionSummary, Source, Thread } from '../shared/types.js';
+import { browserHubDeps, subscribeShared } from './event-hub.js';
 
 export type { ServerEvent, SessionActivity, SessionSummary };
 
@@ -58,16 +59,10 @@ export function imageUrl(unitId: string, sourceId: string, path: string): string
   return `/api/units/${enc(unitId)}/image?source=${enc(sourceId)}&path=${enc(path)}`;
 }
 
-/** Subscribe to server events; EventSource reconnects on its own. Returns an unsubscribe function. */
+/**
+ * Subscribe to server events. All tabs share one connection (see event-hub); it reconnects on its own.
+ * Returns an unsubscribe function.
+ */
 export function subscribeEvents(onEvent: (e: ServerEvent) => void, onOpen?: () => void): () => void {
-  const source = new EventSource('/api/events');
-  source.onmessage = (msg) => {
-    try {
-      onEvent(JSON.parse(msg.data) as ServerEvent);
-    } catch (e) {
-      console.warn('[events] ignoring malformed event', e);
-    }
-  };
-  if (onOpen) source.onopen = onOpen;
-  return () => source.close();
+  return subscribeShared(onEvent, onOpen, browserHubDeps());
 }

@@ -131,8 +131,11 @@ replies in the background after it starts. It skips text the agents inject (syst
 AGENTS.md, interrupt markers) and shows Agent Console's own "apply the review conclusions" message as a marker. The
 first reply of a session shows only the prompt just before it; a turn keeps at most its five newest prompts.
 
-The panel remembers the selected session and the reading position in the browser's localStorage, so reloading the
-page (F5) returns to the same place.
+The panel remembers the selected session and the reading position for each browser tab, so reloading a tab (F5)
+returns it to the same place even when other tabs show other sessions. A new tab starts where any tab was last.
+
+Several tabs can be open at once. They share one live connection to the server (one tab holds it and passes the
+events on; when that tab closes, another takes over), so they do not use up the browser's six connections per host.
 
 ## Files changed outside the edit tools
 

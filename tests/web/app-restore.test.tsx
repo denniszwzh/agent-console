@@ -57,6 +57,7 @@ afterAll(() => {
 });
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   unitsGate = {};
 });
 afterEach(cleanup);
