@@ -2,10 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReviewUnit } from '../shared/types.js';
 import { ApiError, api, subscribeEvents, type SessionActivity, type SessionSummary } from './api.js';
 import { ConversationView } from './components/ConversationView.js';
+import { Notifications } from './components/Notifications.js';
 import { RespondingBanner } from './components/Responding.js';
 import { SessionSwitcher, useHoldSwitcher } from './components/SessionSwitcher.js';
 import { Sidebar } from './components/Sidebar.js';
+import { sessionTitle } from './labels.js';
 import { useSidebarLayout } from './layout.js';
+import { detectCompletions, stackCompletions, type Completion, type FocusTarget } from './notifications.js';
 import type { UnitActions } from './unit-context.js';
 import { loadViewState, saveViewState } from './view-state.js';
 
@@ -30,6 +33,15 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [unauthorized, setUnauthorized] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Finished replies and thread answers waiting to be looked at, oldest first.
+  const [notes, setNotes] = useState<Completion[]>([]);
+  // Where the conversation should go after a notification was clicked.
+  const [focus, setFocus] = useState<(FocusTarget & { sessionId: string }) | null>(null);
+  // The last units applied per session, to tell what finished since (state updaters must stay pure).
+  const unitsSeen = useRef(new Map<string, ReviewUnit[]>());
+  // Set once the first full load is in: from then on a session not seen before is new, so its replies are news.
+  const primed = useRef(false);
+  const focusSeq = useRef(0);
   // Where the page was before a reload; the anchor is used once, for that session's first showing.
   const [restored] = useState(loadViewState);
   const [initialAnchor, setInitialAnchor] = useState(restored.anchor);
@@ -54,9 +66,13 @@ export function App() {
 
   const loadUnits = useCallback(
     (sessionId: string) =>
-      latest(`units:${sessionId}`, () => api.units(sessionId), (list) =>
-        setUnits((prev) => ({ ...prev, [sessionId]: keepUnchanged(prev[sessionId], list) })),
-      ),
+      latest(`units:${sessionId}`, () => api.units(sessionId), (list) => {
+        const seen = unitsSeen.current.get(sessionId) ?? (primed.current ? [] : undefined);
+        const finished = detectCompletions(seen, list);
+        unitsSeen.current.set(sessionId, list);
+        if (finished.length) setNotes((prev) => stackCompletions(prev, finished));
+        setUnits((prev) => ({ ...prev, [sessionId]: keepUnchanged(prev[sessionId], list) }));
+      }),
     [latest],
   );
 
@@ -67,6 +83,7 @@ export function App() {
     try {
       const [list] = await Promise.all([loadSessions(), loadActivity()]);
       await Promise.all(list.map((s) => loadUnits(s.sessionId)));
+      primed.current = true;
       setLoaded(true);
     } catch (e) {
       reportError(e);
@@ -172,7 +189,22 @@ export function App() {
   const selectSession = (session: string) => {
     setSelected(session);
     setInitialAnchor(null);
+    // A notification's place is only for the click that asked for it.
+    setFocus(null);
     saveViewState({ session, anchor: null });
+  };
+
+  const openNote = (item: Completion) => {
+    setNotes((prev) => prev.filter((n) => n.key !== item.key));
+    if (item.sessionId !== selected) selectSession(item.sessionId);
+    focusSeq.current += 1;
+    setFocus({ sessionId: item.sessionId, unitId: item.unitId, threadId: item.threadId, seq: focusSeq.current });
+    if (layout.compact) layout.hide();
+  };
+
+  const titleOf = (sessionId: string) => {
+    const s = sidebarSessions.find((x) => x.sessionId === sessionId);
+    return s ? sessionTitle(s) : sessionId.slice(0, 8);
   };
 
   if (unauthorized) {
@@ -225,6 +257,13 @@ export function App() {
           }}
         />
       )}
+      <Notifications
+        items={notes}
+        titleOf={titleOf}
+        onOpen={openNote}
+        onDismiss={(key) => setNotes((prev) => prev.filter((n) => n.key !== key))}
+        onClear={() => setNotes([])}
+      />
       <div className="main">
         {error && (
           <div className="toast" role="alert">
@@ -244,6 +283,7 @@ export function App() {
             responding={selectedActivity}
             initialAnchor={selected === restored.session ? initialAnchor : null}
             onAnchorChange={(anchor) => saveViewState({ session: selected, anchor })}
+            focus={focus?.sessionId === selected ? focus : null}
           />
         ) : (
           <>
