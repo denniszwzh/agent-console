@@ -39,14 +39,32 @@ describe('setPassword', () => {
   });
 
   it('rejects passwords shorter than 12 characters', async () => {
-    await expect(setPassword('dennis', 'a'.repeat(11))).rejects.toThrow();
+    await expect(setPassword('dennis', 'a'.repeat(11))).rejects.toThrow(/at least 12 characters/);
     expect(readAuthFile()).toBeNull();
     await expect(setPassword('dennis', 'a'.repeat(12))).resolves.toBeTruthy();
   });
 
-  it('increments sessionEpoch when called again', async () => {
-    expect((await setPassword('dennis', PASSWORD)).sessionEpoch).toBe(1);
-    expect((await setPassword('dennis', PASSWORD)).sessionEpoch).toBe(2);
+  it('increases sessionEpoch when called again', async () => {
+    const first = (await setPassword('dennis', PASSWORD)).sessionEpoch;
+    expect(first).toBeGreaterThan(0);
+    expect((await setPassword('dennis', PASSWORD)).sessionEpoch).toBeGreaterThan(first);
+  });
+
+  it('yields a greater epoch after the auth file was deleted', async () => {
+    const before = (await setPassword('dennis', PASSWORD)).sessionEpoch;
+    fs.rmSync(authFilePath());
+    expect((await setPassword('dennis', PASSWORD)).sessionEpoch).toBeGreaterThan(before);
+  });
+
+  it('counts the minimum length in code points after NFKC', async () => {
+    const smile = String.fromCodePoint(0x1f600);
+    await expect(setPassword('dennis', smile.repeat(11))).rejects.toThrow();
+    await expect(setPassword('dennis', smile.repeat(12))).resolves.toBeTruthy();
+  });
+
+  it('leaves no temporary file behind', async () => {
+    await setPassword('dennis', PASSWORD);
+    expect(fs.readdirSync(home).filter((f) => f.endsWith('.tmp'))).toEqual([]);
   });
 });
 
@@ -67,9 +85,9 @@ describe('bumpEpoch', () => {
   it('increments sessionEpoch and keeps the hash', async () => {
     const before = await setPassword('dennis', PASSWORD);
     const after = bumpEpoch();
-    expect(after?.sessionEpoch).toBe(before.sessionEpoch + 1);
+    expect(after?.sessionEpoch).toBeGreaterThan(before.sessionEpoch);
     expect(after?.hash).toBe(before.hash);
-    expect(readAuthFile()?.sessionEpoch).toBe(before.sessionEpoch + 1);
+    expect(readAuthFile()?.sessionEpoch).toBe(after?.sessionEpoch);
   });
 
   it('returns null without an auth file', () => {
@@ -83,5 +101,29 @@ describe('readAuthFile', () => {
       fs.writeFileSync(authFilePath(), content);
       expect(readAuthFile()).toBeNull();
     }
+  });
+
+  it('returns null for invalid field values', async () => {
+    const good = await setPassword('dennis', PASSWORD);
+    const bad: unknown[] = [
+      { ...good, hash: 'zz'.repeat(64) },
+      { ...good, hash: good.hash.slice(0, -2) },
+      { ...good, sessionEpoch: 0 },
+      { ...good, scrypt: { ...good.scrypt, N: 3 } },
+      { ...good, scrypt: { ...good.scrypt, N: 2 ** 30 } },
+      { ...good, scrypt: { ...good.scrypt, r: 1000 } },
+    ];
+    for (const b of bad) {
+      fs.writeFileSync(authFilePath(), JSON.stringify(b));
+      expect(readAuthFile()).toBeNull();
+    }
+  });
+});
+
+describe('verifyCredentials errors', () => {
+  it('returns false instead of rejecting on scrypt errors', async () => {
+    const good = await setPassword('dennis', PASSWORD);
+    const broken = { ...good, scrypt: { ...good.scrypt, N: 3 } };
+    expect(await verifyCredentials(broken, 'dennis', PASSWORD)).toBe(false);
   });
 });

@@ -23,21 +23,26 @@ export function authFilePath(): string {
   return path.join(dataDir(), 'auth.json');
 }
 
-const HEX = /^[0-9a-f]+$/;
+const HEX = /^(?:[0-9a-f]{2})+$/;
 
 function isAuthFile(v: unknown): v is AuthFile {
   if (!v || typeof v !== 'object') return false;
   const a = v as Record<string, unknown>;
   const s = a.scrypt as Record<string, unknown> | null;
-  const posInt = (x: unknown): x is number => Number.isInteger(x) && (x as number) > 0;
-  return (
-    typeof a.username === 'string' &&
-    typeof a.salt === 'string' && HEX.test(a.salt) &&
-    typeof a.hash === 'string' && HEX.test(a.hash) &&
-    !!s && typeof s === 'object' &&
-    posInt(s.N) && posInt(s.r) && posInt(s.p) && posInt(s.keylen) &&
-    posInt(a.sessionEpoch)
-  );
+  const intIn = (x: unknown, min: number, max: number): x is number =>
+    Number.isInteger(x) && (x as number) >= min && (x as number) <= max;
+  if (
+    typeof a.username !== 'string' ||
+    typeof a.salt !== 'string' || !HEX.test(a.salt) ||
+    typeof a.hash !== 'string' || !HEX.test(a.hash) ||
+    !s || typeof s !== 'object' ||
+    !intIn(s.N, 2, 2 ** 20) || ((s.N as number) & ((s.N as number) - 1)) !== 0 ||
+    !intIn(s.r, 1, 32) || !intIn(s.p, 1, 16) || !intIn(s.keylen, 16, 128) ||
+    !intIn(a.sessionEpoch, 1, Number.MAX_SAFE_INTEGER)
+  ) {
+    return false;
+  }
+  return a.hash.length === (s.keylen as number) * 2;
 }
 
 /** Missing, empty or malformed file -> null. */
@@ -56,7 +61,17 @@ function writeAuthFile(auth: AuthFile): void {
   try {
     // Mode 0o600 has no effect on Windows.
     fs.writeFileSync(tmp, JSON.stringify(auth, null, 2), { mode: 0o600 });
-    fs.renameSync(tmp, file);
+    // On Windows a reader holding the file open can make rename fail briefly.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        fs.renameSync(tmp, file);
+        break;
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code;
+        if (attempt >= 5 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw e;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+    }
   } catch (e) {
     fs.rmSync(tmp, { force: true });
     throw e;
@@ -79,8 +94,14 @@ function derive(
   });
 }
 
+// Epoch is also lower-bounded by the clock so that a deleted or corrupted auth file
+// cannot make a new password reuse an epoch that old sessions were minted under.
+function nextEpoch(prev: AuthFile | null): number {
+  return Math.max((prev?.sessionEpoch ?? 0) + 1, Date.now());
+}
+
 export async function setPassword(username: string, password: string): Promise<AuthFile> {
-  if (password.length < MIN_PASSWORD_LENGTH) {
+  if ([...password.normalize('NFKC')].length < MIN_PASSWORD_LENGTH) {
     throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
   }
   const salt = crypto.randomBytes(SALT_BYTES);
@@ -90,7 +111,7 @@ export async function setPassword(username: string, password: string): Promise<A
     salt: salt.toString('hex'),
     hash: key.toString('hex'),
     scrypt: { ...SCRYPT },
-    sessionEpoch: (readAuthFile()?.sessionEpoch ?? 0) + 1,
+    sessionEpoch: nextEpoch(readAuthFile()),
   };
   writeAuthFile(auth);
   return auth;
@@ -100,7 +121,7 @@ export async function setPassword(username: string, password: string): Promise<A
 export function bumpEpoch(): AuthFile | null {
   const auth = readAuthFile();
   if (!auth) return null;
-  const next = { ...auth, sessionEpoch: auth.sessionEpoch + 1 };
+  const next = { ...auth, sessionEpoch: nextEpoch(auth) };
   writeAuthFile(next);
   return next;
 }
@@ -120,7 +141,12 @@ export async function verifyCredentials(
   const real = auth !== null;
   const salt = real ? Buffer.from(auth.salt, 'hex') : FAKE_SALT;
   const params = real ? auth.scrypt : SCRYPT;
-  const key = await derive(password, salt, params);
+  let key: Buffer;
+  try {
+    key = await derive(password, salt, params);
+  } catch {
+    return false;
+  }
   const expected = real ? Buffer.from(auth.hash, 'hex') : key;
   const hashOk = expected.length === key.length && crypto.timingSafeEqual(expected, key);
   const userOk = safeEqualStrings(real ? auth.username : '', username);
