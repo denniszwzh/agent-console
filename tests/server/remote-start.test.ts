@@ -95,6 +95,23 @@ describe('startRemote', () => {
     expect(logs).toEqual(['Remote access is off: remote.hostnames must be a non-empty array of host names']);
   });
 
+  it('logs the reason and returns null when remote.port equals the local port', async () => {
+    await setPassword('admin', 'correct horse battery');
+    const close = vi.spyOn(RemoteAuth.prototype, 'close');
+    expect(await startRemote(deps(remote({ port: 4317 })), log)).toBeNull();
+    expect(logs).toEqual(['Remote access is off: remote.port must differ from port']);
+    expect(fs.existsSync(path.join(home, 'tls'))).toBe(false);
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it('says auth.json is unreadable when it exists but is malformed', async () => {
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, 'auth.json'), '{ not json');
+    expect(await startRemote(deps(remote({ port: await freePort() })), log)).toBeNull();
+    expect(logs).toEqual(['Remote access is off: auth.json is unreadable or malformed; run "agent-console set-password" again']);
+    expect(fs.existsSync(path.join(home, 'tls'))).toBe(false);
+  });
+
   it('logs the reason and returns null when no password is set', async () => {
     const close = vi.spyOn(RemoteAuth.prototype, 'close');
     expect(await startRemote(deps(remote({ port: await freePort() })), log)).toBeNull();

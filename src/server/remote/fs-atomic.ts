@@ -1,7 +1,10 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
-/** Write via a unique tmp file in the same directory, then rename over the target. */
+/**
+ * Write via a unique tmp file in the same directory, then rename over the target.
+ * The file is always created with the fixed mode 0o600 (owner read/write only), whatever the target had before.
+ */
 export function writeFileAtomic(file: string, data: string): void {
   const tmp = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
   try {

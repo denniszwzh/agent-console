@@ -49,6 +49,8 @@ export interface AppDeps {
   remote?: { config: RemoteConfig; auth: RemoteAuth };
   /** PEM certificate and key; the server speaks HTTPS (HTTP/1.1) when set. */
   https?: { cert: string; key: string };
+  /** Event-stream heartbeat interval in ms (default 25 s); the external entry also re-checks the session on each beat. */
+  heartbeatMs?: number;
 }
 
 export const COOKIE_NAME = 'ac_token';
@@ -209,6 +211,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       if (typeof body !== 'object' || body === null || typeof body.username !== 'string' || typeof body.password !== 'string') {
         return reply.code(400).send({ error: INVALID_REQUEST });
       }
+      // Oversized input is rejected before any scrypt run and is not counted as a failed sign-in.
+      if (body.username.length > 256 || body.password.length > 1024) {
+        return reply.code(400).send({ error: INVALID_REQUEST });
+      }
       const ua = req.headers['user-agent'];
       const res = await auth.login(body.username, body.password, { ip: req.ip, userAgent: typeof ua === 'string' ? ua : '' });
       if (res.ok) {
@@ -275,7 +281,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const unsubscribe = bus.subscribe((e) => {
         raw.write(`data: ${JSON.stringify(e)}\n\n`);
       });
-      const heartbeat = setInterval(() => raw.write(': ping\n\n'), 25_000);
+      const sessionId = remote ? readCookie(req.headers.cookie, SESSION_COOKIE) : null;
+      const heartbeat = setInterval(() => {
+        if (remote) {
+          // An expired session must not keep its stream; end it like a revocation does.
+          let valid = false;
+          try {
+            valid = remote.auth.check(sessionId).ok;
+          } catch (e) {
+            req.log.error(e);
+          }
+          if (!valid) {
+            cleanup();
+            raw.end(REVOKED_EVENT);
+            return;
+          }
+        }
+        raw.write(': ping\n\n');
+      }, deps.heartbeatMs ?? 25_000);
       heartbeat.unref();
       const cleanup = () => {
         clearInterval(heartbeat);

@@ -103,6 +103,15 @@ describe('readAuthFile', () => {
     }
   });
 
+  it('accepts the parameters setPassword writes and the upper bounds', async () => {
+    const good = await setPassword('dennis', PASSWORD);
+    expect(readAuthFile()).not.toBeNull();
+    for (const scrypt of [{ ...good.scrypt, N: 2 ** 17 }, { ...good.scrypt, r: 16 }]) {
+      fs.writeFileSync(authFilePath(), JSON.stringify({ ...good, scrypt }));
+      expect(readAuthFile()).not.toBeNull();
+    }
+  });
+
   it('returns null for invalid field values', async () => {
     const good = await setPassword('dennis', PASSWORD);
     const bad: unknown[] = [
@@ -111,6 +120,8 @@ describe('readAuthFile', () => {
       { ...good, sessionEpoch: 0 },
       { ...good, scrypt: { ...good.scrypt, N: 3 } },
       { ...good, scrypt: { ...good.scrypt, N: 2 ** 30 } },
+      { ...good, scrypt: { ...good.scrypt, N: 2 ** 18 } },
+      { ...good, scrypt: { ...good.scrypt, r: 17 } },
       { ...good, scrypt: { ...good.scrypt, r: 1000 } },
     ];
     for (const b of bad) {

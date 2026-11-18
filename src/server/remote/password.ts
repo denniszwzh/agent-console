@@ -24,6 +24,7 @@ export function authFilePath(): string {
   return path.join(dataDir(), 'auth.json');
 }
 
+// Each unauthenticated attempt runs scrypt with the stored parameters, so they are capped (N <= 2^17, r <= 16).
 const HEX = /^(?:[0-9a-f]{2})+$/;
 
 function isAuthFile(v: unknown): v is AuthFile {
@@ -37,8 +38,8 @@ function isAuthFile(v: unknown): v is AuthFile {
     typeof a.salt !== 'string' || !HEX.test(a.salt) ||
     typeof a.hash !== 'string' || !HEX.test(a.hash) ||
     !s || typeof s !== 'object' ||
-    !intIn(s.N, 2, 2 ** 20) || ((s.N as number) & ((s.N as number) - 1)) !== 0 ||
-    !intIn(s.r, 1, 32) || !intIn(s.p, 1, 16) || !intIn(s.keylen, 16, 128) ||
+    !intIn(s.N, 2, 2 ** 17) || ((s.N as number) & ((s.N as number) - 1)) !== 0 ||
+    !intIn(s.r, 1, 16) || !intIn(s.p, 1, 16) || !intIn(s.keylen, 16, 128) ||
     !intIn(a.sessionEpoch, 1, Number.MAX_SAFE_INTEGER)
   ) {
     return false;

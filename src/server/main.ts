@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { isIP } from 'node:net';
 import { pathToFileURL } from 'node:url';
 import type { FastifyInstance } from 'fastify';
@@ -15,6 +16,7 @@ import { UnitStore } from './store.js';
 import { ThreadEngine } from './threads.js';
 import { ensureToken, readConfig, writeServerInfo } from './paths.js';
 import { RemoteAuth } from './remote/auth.js';
+import { authFilePath } from './remote/password.js';
 import { remoteUrls, resolveRemoteConfig } from './remote/config.js';
 import { loadOrCreateCert, type TlsMaterial } from './remote/tls.js';
 
@@ -45,10 +47,14 @@ export async function startRemote(
     if (resolved.status === 'disabled') return null;
     if (resolved.status === 'invalid') return off(resolved.reason);
     const config = resolved.config;
+    if (config.port === deps.port) return off('remote.port must differ from port');
 
     auth = new RemoteAuth({ sessionDays: config.sessionDays });
     if (!auth.hasPassword()) {
       auth.close();
+      if (fs.existsSync(authFilePath())) {
+        return off('auth.json is unreadable or malformed; run "agent-console set-password" again');
+      }
       return off('no password is set; run `agent-console set-password` first');
     }
 

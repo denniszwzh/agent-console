@@ -50,7 +50,7 @@ function config(port = PORT): RemoteConfig {
   return { port, bindHost: '0.0.0.0', hostnames: ['ws1.corp'], sessionDays: 30 };
 }
 
-function mk(opts: { port?: number; engine?: ThreadEngine; activity?: ActivityTracker; bus?: EventBus } = {}): {
+function mk(opts: { heartbeatMs?: number; port?: number; engine?: ThreadEngine; activity?: ActivityTracker; bus?: EventBus } = {}): {
   app: FastifyInstance;
   bus: EventBus;
   auth: RemoteAuth;
@@ -70,6 +70,7 @@ function mk(opts: { port?: number; engine?: ThreadEngine; activity?: ActivityTra
     codexQueue: async () => false,
     webRoot: join(home, 'no-web'),
     activity: opts.activity,
+    heartbeatMs: opts.heartbeatMs,
     remote: { config: config(opts.port), auth },
   });
   const routes: { method: string; url: string }[] = [];
@@ -294,6 +295,21 @@ describe('remote entry: sign-in', () => {
     expect((await login(a)).statusCode).toBe(204);
   });
 
+  it('oversized credentials answer 400 and do not count as failures', async () => {
+    const { app: a } = mk();
+    const post = (username: string, password: string) =>
+      a.inject({ method: 'POST', url: '/auth/login', headers: { host: HOST }, payload: { username, password } });
+    for (let i = 0; i < 6; i++) {
+      for (const [u, p] of [['u'.repeat(257), PASSWORD], [USER, 'p'.repeat(1025)]]) {
+        const res = await post(u, p);
+        expect(res.statusCode).toBe(400);
+        expect(res.json()).toEqual({ error: 'Invalid request' });
+      }
+    }
+    // Twelve oversized attempts did not lock the address.
+    expect((await login(a)).statusCode).toBe(204);
+  });
+
   it('logout invalidates the cookie', async () => {
     const { app: a } = mk();
     const id = await signIn(a);
@@ -395,6 +411,23 @@ describe('remote entry: event stream revocation', () => {
     const stream = await openStream((a.server.address() as AddressInfo).port, id);
     try {
       expect(String(stream.headers['set-cookie'])).toMatch(new RegExp(`^${COOKIE}=${id}; .*Max-Age=2592000`));
+    } finally {
+      stream.req.destroy();
+    }
+  });
+
+  it('the heartbeat ends the stream of a session that has expired', async () => {
+    const { app: a } = mk({ heartbeatMs: 50 });
+    const id = await signIn(a);
+    await a.listen({ port: 0, host: '127.0.0.1' });
+    const stream = await openStream((a.server.address() as AddressInfo).port, id);
+    try {
+      await new Promise((r) => setTimeout(r, 120));
+      expect(stream.isEnded()).toBe(false);
+      expect(stream.data).toContain(': ping');
+      clock += 31 * DAY_MS;
+      await within(stream.ended, 2000, 'stream to end');
+      expect(stream.data).toContain('data: {"type":"auth.revoked"}\n\n');
     } finally {
       stream.req.destroy();
     }
