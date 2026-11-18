@@ -9,7 +9,8 @@ session, so the main conversation is never touched. When you want the main sessi
 one click integrates a one-line conclusion per thread and sends them back as a single bundle.
 
 Everything runs locally: the server listens on `127.0.0.1` only, the UI is bundled (no CDN), and every
-`/api` call needs a token.
+`/api` call needs a token. An optional password-protected HTTPS entry for other computers is off by default (see
+"Remote access").
 
 ## Requirements
 
@@ -85,6 +86,14 @@ taken by another program you get an `EADDRINUSE` message; change `port` in the c
 
 Keep it running while you work. There is no start-at-login option; start it once per login.
 
+Other commands:
+
+| Command | What it does |
+| --- | --- |
+| `agent-console install` / `uninstall` | Add / remove the hooks (step 3 and "Uninstall"). |
+| `agent-console set-password` | Set the user name and password for the external entry (see "Remote access"). Signs out every remote device. |
+| `agent-console logout-all` | Sign out every remote device without changing the password. |
+
 ### 5. Use it with Claude Code or Codex
 
 Work in the terminal as usual (`claude` or `codex`, in any project folder). Each time the agent finishes a turn, the
@@ -126,6 +135,115 @@ folder, and `~/.agent-console/` to remove all data.
 | `concurrency` | `3` | Maximum number of fork runs at the same time. |
 | `hardGate` | `false` | Claude only: block your next prompt while a review thread of the latest reply is still being answered, or its conclusions are being integrated. |
 | `runTimeoutMs` | `600000` | Upper bound for one fork run (answer or conclusion). On timeout the thread shows `Timed out after N min` and can be retried. |
+| `remote` | not set | Optional object that turns on the external (HTTPS) entry; see "Remote access". |
+| `remote.enabled` | `false` | The external entry starts only when this is exactly `true`. |
+| `remote.hostnames` | none (required) | Non-empty list of the host names or IP addresses clients use to reach this computer. Bare names only: no scheme, port, path or `%zone`. They go into the self-signed certificate and are the only `Host` values the external entry accepts. |
+| `remote.port` | `4318` | HTTPS port, an integer from 1 to 65535. |
+| `remote.bindHost` | `0.0.0.0` | Address to listen on (all IPv4 interfaces by default). Use a specific address to limit it to one network interface. |
+| `remote.sessionDays` | `30` | How long a remote sign-in lasts, an integer from 1 to 3650. Each use extends it (sliding expiry). |
+| `remote.certFile`, `remote.keyFile` | not set | PEM certificate and private key of your own (for example a company certificate). Set both or neither. |
+
+## Remote access
+
+By default Agent Console is reachable only from this computer. You can additionally open an HTTPS entry, protected by
+a user name and password, so that you can use the same panel from another computer. It is off until you turn it on,
+and the local entry (`127.0.0.1`, token) keeps working exactly as before.
+
+The external entry serves the same panel and API, but it accepts only a password sign-in. It never accepts the local
+token, and it answers `403` to any `Host` or `Origin` that is not one of `remote.hostnames`.
+
+### Turn it on
+
+1. Set the user name and password (on the computer that runs Agent Console):
+
+   ```
+   agent-console set-password
+   ```
+
+   It asks for a user name (defaulting to the current one), a new password of at least 12 characters, and a
+   confirmation. Only a scrypt hash is stored (`~/.agent-console/auth.json`). Typed passwords are not echoed on a
+   terminal; if standard input is piped, the input is visible and the command says so.
+
+2. Add a `remote` object to `~/.agent-console/config.json`:
+
+   ```json
+   {
+     "remote": {
+       "enabled": true,
+       "hostnames": ["my-workstation", "192.168.1.20"],
+       "port": 4318,
+       "sessionDays": 30
+     }
+   }
+   ```
+
+   `hostnames` must list every name or address you will type in the other computer's browser. Only `enabled` and
+   `hostnames` are required; the other keys are optional (see the Configuration table).
+
+3. Allow the port through the Windows firewall. Run this yourself in an elevated PowerShell (Run as administrator);
+   Agent Console never changes system or firewall settings:
+
+   ```powershell
+   New-NetFirewallRule -DisplayName "Agent Console remote" -Direction Inbound -Protocol TCP -LocalPort 4318 -Action Allow
+   ```
+
+   Use your own `remote.port` if you changed it. You can narrow the rule with `-RemoteAddress` or `-Profile Private`.
+
+4. Start (or restart) `agent-console`. The console prints the certificate location and fingerprint, then one address
+   per host name:
+
+   ```
+   Remote access certificate: C:\Users\you\.agent-console\tls\cert.pem (SHA-256 AB:CD:...)
+   Remote access: https://my-workstation:4318/
+   ```
+
+   Open that address on the other computer and sign in. The browser stays signed in for `sessionDays` days (each
+   visit extends it).
+
+If the external entry cannot start, the console prints `Remote access is off: <reason>` and only that entry is
+skipped; the local panel still starts. Typical reasons: no password is set yet, an invalid `remote` value, an
+unreadable or mismatched `certFile` / `keyFile`, or the port is already in use.
+
+### Trust the certificate
+
+Unless you configure `certFile` and `keyFile`, Agent Console creates a self-signed certificate for `remote.hostnames`
+in `~/.agent-console/tls/` (`cert.pem` and `key.pem`). It is valid for 2 years and is renewed automatically at the
+next start when less than 30 days remain, when it no longer matches `remote.hostnames`, or when its files are
+unusable. Browsers do not trust it by default, so on the other computer do one of these:
+
+- Import it once (recommended). Copy `cert.pem` from the workstation to the client (never `key.pem`), then in
+  PowerShell on the client, for the current user:
+
+  ```powershell
+  Import-Certificate -FilePath .\cert.pem -CertStoreLocation Cert:\CurrentUser\Root
+  ```
+
+  This places it in "Trusted Root Certification Authorities" for your account; Windows asks you to confirm. Browsers
+  that use the Windows store (Edge, Chrome) then accept the address without a warning.
+- Or click through the browser warning once, after checking that the certificate's SHA-256 fingerprint shown by the
+  browser equals the one the console printed at startup.
+
+Whenever the certificate is regenerated (the console then prints "A new self-signed certificate was created"), every
+client has to trust the new one again in the same way.
+
+To use a certificate your clients already trust (for example a company one), set both `remote.certFile` and
+`remote.keyFile` to PEM files. Agent Console then uses them as they are, never creates or renews anything, and the
+host names you connect with must be covered by that certificate.
+
+### Security notes
+
+- Signing in remotely gives the same powers as the local panel: asking threads (read-only forks that run under your
+  account), sending, and integrating conclusions. Treat the password like a key to this computer's sessions and use a
+  unique one.
+- Five failed sign-ins from one IP address within 15 minutes lock that address out for 15 minutes, and every failed
+  sign-in is answered after about a second.
+- The session cookie is `__Host-ac_session` (`Secure`, `HttpOnly`, `SameSite=Strict`). Only a hash of each session id
+  is stored (`~/.agent-console/sessions.json`).
+- `agent-console set-password` signs out every device, and so does `agent-console logout-all`, which keeps the
+  password. A running server notices either within a few seconds; open panels return to the sign-in screen. The
+  panel's own **Sign out** button ends only that browser's session.
+- HTTPS protects the password in transit, but expose the port only to networks you trust (a home or office LAN, or a
+  VPN). Do not forward it to the internet.
 
 ## Hook time budget
 
