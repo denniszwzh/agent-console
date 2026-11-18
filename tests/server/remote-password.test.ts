@@ -38,6 +38,12 @@ describe('setPassword', () => {
     expect(readAuthFile()).toEqual(auth);
   });
 
+  it('rejects passwords longer than 1024 characters', async () => {
+    await expect(setPassword('dennis', 'a'.repeat(1025))).rejects.toThrow(/at most 1024 characters/);
+    expect(readAuthFile()).toBeNull();
+    await expect(setPassword('dennis', 'a'.repeat(1024))).resolves.toBeTruthy();
+  });
+
   it('rejects passwords shorter than 12 characters', async () => {
     await expect(setPassword('dennis', 'a'.repeat(11))).rejects.toThrow(/at least 12 characters/);
     expect(readAuthFile()).toBeNull();

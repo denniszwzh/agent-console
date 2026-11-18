@@ -30,6 +30,29 @@ describe('SessionStore', () => {
     expect(raw).toContain(key);
   });
 
+  it('isValid is read-only: it neither extends nor persists anything', () => {
+    const s = make();
+    const { id } = s.create(1, META);
+    const before = fs.readFileSync(file, 'utf8');
+    t += 29 * DAY;
+    expect(s.isValid(id, 1)).toBe(true);
+    expect(s.isValid(id, 2)).toBe(false);
+    expect(s.isValid('nope', 1)).toBe(false);
+    expect(s.isValid('0'.repeat(64), 1)).toBe(false);
+    expect(fs.readFileSync(file, 'utf8')).toBe(before);
+    // Not slid by isValid, so the original 30 days still apply, and a due refresh is still reported.
+    t += 2 * DAY;
+    expect(s.isValid(id, 1)).toBe(false);
+  });
+
+  it('isValid does not use up the cookie refresh', () => {
+    const s = make();
+    const { id, key } = s.create(1, META);
+    t += DAY + 1000;
+    expect(s.isValid(id, 1)).toBe(true);
+    expect(s.check(id, 1)).toEqual({ valid: true, key, refresh: true });
+  });
+
   it('check accepts a fresh session and rejects unknown ids', () => {
     const s = make();
     const { id, key } = s.create(1, META);

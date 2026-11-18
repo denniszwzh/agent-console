@@ -102,6 +102,13 @@ export class RemoteAuth {
     return { ok: true, key: res.key, username: auth.username, refresh: res.refresh };
   }
 
+  /** Whether the session is still valid, without extending it (for long-lived streams). */
+  peek(id: string | null): boolean {
+    const auth = this.current();
+    if (!auth || !id) return false;
+    return this.store.isValid(id, auth.sessionEpoch);
+  }
+
   logout(id: string): string | null {
     if (typeof id !== 'string' || !ID_RE.test(id)) return null;
     if (!this.store.revoke(id)) return null;

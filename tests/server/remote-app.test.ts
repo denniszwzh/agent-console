@@ -433,6 +433,42 @@ describe('remote entry: event stream revocation', () => {
     }
   });
 
+  it('heartbeats do not consume the cookie refresh of a long-lived stream', async () => {
+    const { app: a } = mk({ heartbeatMs: 30 });
+    const id = await signIn(a);
+    await a.listen({ port: 0, host: '127.0.0.1' });
+    const stream = await openStream((a.server.address() as AddressInfo).port, id);
+    try {
+      clock += DAY_MS + 60_000;
+      await new Promise((r) => setTimeout(r, 150));
+      expect(stream.isEnded()).toBe(false);
+      const res = await a.inject({ method: 'GET', url: '/api/sessions', headers: withSession(id) });
+      expect(res.statusCode).toBe(200);
+      expect(String(res.headers['set-cookie'])).toMatch(new RegExp(`^${COOKIE}=${id}; .*Max-Age=2592000`));
+    } finally {
+      stream.req.destroy();
+    }
+  });
+
+  it('an idle stream ends once its session expires, however the clock advances', async () => {
+    const { app: a } = mk({ heartbeatMs: 30 });
+    const id = await signIn(a);
+    await a.listen({ port: 0, host: '127.0.0.1' });
+    const stream = await openStream((a.server.address() as AddressInfo).port, id);
+    try {
+      for (let i = 0; i < 2; i++) {
+        clock += 10 * DAY_MS;
+        await new Promise((r) => setTimeout(r, 100));
+        expect(stream.isEnded()).toBe(false);
+      }
+      clock += 11 * DAY_MS;
+      await within(stream.ended, 2000, 'stream to end');
+      expect(stream.data).toContain('data: {"type":"auth.revoked"}\n\n');
+    } finally {
+      stream.req.destroy();
+    }
+  });
+
   it('revocation sends auth.revoked and closes the event stream', async () => {
     const { app: a, bus } = mk();
     const idA = await signIn(a);

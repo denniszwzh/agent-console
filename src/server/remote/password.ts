@@ -13,6 +13,8 @@ export interface AuthFile {
 }
 
 export const MIN_PASSWORD_LENGTH = 12;
+/** Longest accepted password (UTF-16 units); the login route answers 400 above this. */
+export const MAX_PASSWORD_LENGTH = 1024;
 
 // N=2^15, r=8, p=1 needs ~32 MiB and takes roughly 100 ms on a laptop.
 const SCRYPT = { N: 32768, r: 8, p: 1, keylen: 64 };
@@ -86,6 +88,9 @@ function nextEpoch(prev: AuthFile | null): number {
 export async function setPassword(username: string, password: string): Promise<AuthFile> {
   if ([...password.normalize('NFKC')].length < MIN_PASSWORD_LENGTH) {
     throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+  }
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    throw new Error(`Password must be at most ${MAX_PASSWORD_LENGTH} characters`);
   }
   const salt = crypto.randomBytes(SALT_BYTES);
   const key = await derive(password, salt, SCRYPT);

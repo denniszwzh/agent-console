@@ -17,6 +17,7 @@ import type { ThreadEngine } from './threads.js';
 import { readConfig } from './paths.js';
 import { SessionMetaService, defaultSessionMetaOptions } from './session-meta.js';
 import { allowedHosts, allowedOrigins, type RemoteConfig } from './remote/config.js';
+import { MAX_PASSWORD_LENGTH } from './remote/password.js';
 import type { AuthCheck, RemoteAuth } from './remote/auth.js';
 import type { Config, SessionSummary } from '../shared/types.js';
 
@@ -212,7 +213,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return reply.code(400).send({ error: INVALID_REQUEST });
       }
       // Oversized input is rejected before any scrypt run and is not counted as a failed sign-in.
-      if (body.username.length > 256 || body.password.length > 1024) {
+      if (body.username.length > 256 || body.password.length > MAX_PASSWORD_LENGTH) {
         return reply.code(400).send({ error: INVALID_REQUEST });
       }
       const ua = req.headers['user-agent'];
@@ -287,7 +288,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           // An expired session must not keep its stream; end it like a revocation does.
           let valid = false;
           try {
-            valid = remote.auth.check(sessionId).ok;
+            valid = remote.auth.peek(sessionId);
           } catch (e) {
             req.log.error(e);
           }

@@ -85,6 +85,13 @@ export class SessionStore {
     return { valid: true, key, refresh };
   }
 
+  /** Read-only validity check: never slides the expiry, refreshes the cookie or writes the file. */
+  isValid(id: string, epoch: number): boolean {
+    if (typeof id !== 'string' || !ID_RE.test(id)) return false;
+    const rec = this.sessions.get(sha256(id));
+    return rec !== undefined && rec.expiresAt > this.now() && rec.epoch === epoch;
+  }
+
   /** Returns whether a session existed (and was removed). */
   revoke(id: string): boolean {
     if (typeof id !== 'string') return false;

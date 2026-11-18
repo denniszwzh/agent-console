@@ -66,6 +66,14 @@ describe('set-password', () => {
     expect(logs.join('\n')).toContain('at least 12');
   });
 
+  it('rejects a password longer than 1024 characters with a clear message', async () => {
+    const logs: string[] = [];
+    const long = 'a'.repeat(1025);
+    expect(await runSetPassword(fake('alice', [long, long]), (s) => logs.push(s))).toBe(false);
+    expect(readAuthFile()).toBeNull();
+    expect(logs.join('\n')).toContain('at most 1024');
+  });
+
   it('rejects mismatched confirmation', async () => {
     const logs: string[] = [];
     expect(await runSetPassword(fake('alice', [GOOD, GOOD + 'x']), (s) => logs.push(s))).toBe(false);
