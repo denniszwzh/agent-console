@@ -38,12 +38,13 @@ export function resolveRemoteConfig(raw: unknown): RemoteConfigResult {
   }
 
   const sessionDays = r.sessionDays ?? DEFAULT_SESSION_DAYS;
-  if (typeof sessionDays !== 'number' || !Number.isFinite(sessionDays) || sessionDays <= 0) {
-    return invalid('remote.sessionDays must be a number greater than 0');
+  if (typeof sessionDays !== 'number' || !Number.isInteger(sessionDays) || sessionDays <= 0) {
+    return invalid('remote.sessionDays must be a positive integer');
   }
 
-  const bindHost = r.bindHost ?? DEFAULT_BIND_HOST;
-  if (!isNonEmptyString(bindHost)) return invalid('remote.bindHost must be a non-empty string');
+  const rawBindHost = r.bindHost ?? DEFAULT_BIND_HOST;
+  if (!isNonEmptyString(rawBindHost)) return invalid('remote.bindHost must be a non-empty string');
+  const bindHost = rawBindHost.trim();
 
   if (
     !Array.isArray(r.hostnames) ||
@@ -52,7 +53,15 @@ export function resolveRemoteConfig(raw: unknown): RemoteConfigResult {
   ) {
     return invalid('remote.hostnames must be a non-empty array of host names');
   }
-  const hostnames = (r.hostnames as string[]).map((h) => h.trim().toLowerCase());
+  const hostnames: string[] = [];
+  for (const entry of r.hostnames as string[]) {
+    const h = entry.trim().toLowerCase();
+    const isV6 = isIP(h) === 6;
+    if (h.includes('/') || (h.includes(':') && !isV6)) {
+      return invalid(`remote.hostnames entry "${entry}" must be a bare host name or IP`);
+    }
+    hostnames.push(isV6 ? new URL(`http://[${h}]`).hostname.slice(1, -1) : h);
+  }
 
   const hasCert = r.certFile !== undefined;
   const hasKey = r.keyFile !== undefined;
@@ -65,8 +74,8 @@ export function resolveRemoteConfig(raw: unknown): RemoteConfigResult {
 
   const config: RemoteConfig = { port, bindHost, hostnames, sessionDays };
   if (hasCert) {
-    config.certFile = r.certFile as string;
-    config.keyFile = r.keyFile as string;
+    config.certFile = (r.certFile as string).trim();
+    config.keyFile = (r.keyFile as string).trim();
   }
   return { status: 'ok', config };
 }

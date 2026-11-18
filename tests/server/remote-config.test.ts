@@ -16,7 +16,7 @@ function invalidReason(raw: unknown): string {
 
 describe('resolveRemoteConfig', () => {
   it('returns disabled when remote is missing or enabled is not true', () => {
-    for (const raw of [undefined, {}, { enabled: false }, { enabled: 'yes' }]) {
+    for (const raw of [undefined, null, true, [], {}, { enabled: false }, { enabled: 'yes' }]) {
       expect(resolveRemoteConfig(raw)).toEqual({ status: 'disabled' });
     }
   });
@@ -61,7 +61,7 @@ describe('resolveRemoteConfig', () => {
 
   it('rejects sessionDays <= 0', () => {
     const base = { enabled: true, hostnames: ['ws1.corp'] };
-    for (const sessionDays of [0, -1, '30']) {
+    for (const sessionDays of [0, -1, 0.5, '30']) {
       expect(invalidReason({ ...base, sessionDays })).toContain('sessionDays');
     }
     expect(ok({ ...base, sessionDays: 7 }).sessionDays).toBe(7);
@@ -71,6 +71,38 @@ describe('resolveRemoteConfig', () => {
     expect(ok({ enabled: true, hostnames: ['WS123.Corp.Example'] }).hostnames).toEqual([
       'ws123.corp.example',
     ]);
+  });
+});
+
+describe('resolveRemoteConfig tightened validation', () => {
+  const base = { enabled: true, hostnames: ['ws1.corp'] };
+
+  it('rejects an empty or blank bindHost and trims a valid one', () => {
+    expect(invalidReason({ ...base, bindHost: '' })).toContain('bindHost');
+    expect(invalidReason({ ...base, bindHost: '   ' })).toContain('bindHost');
+    expect(ok({ ...base, bindHost: ' 127.0.0.1 ' }).bindHost).toBe('127.0.0.1');
+  });
+
+  it('trims hostnames, certFile and keyFile', () => {
+    expect(ok({ enabled: true, hostnames: ['  ws1.corp '] }).hostnames).toEqual(['ws1.corp']);
+    expect(ok({ ...base, certFile: ' c.pem ', keyFile: ' k.pem ' })).toMatchObject({
+      certFile: 'c.pem',
+      keyFile: 'k.pem',
+    });
+    expect(invalidReason({ ...base, certFile: '  ', keyFile: 'k.pem' })).toContain('certFile');
+  });
+
+  it('rejects hostnames with a port, scheme or path', () => {
+    for (const bad of ['ws1.corp:4318', 'https://ws1.corp', 'ws1.corp/x']) {
+      const reason = invalidReason({ enabled: true, hostnames: [bad] });
+      expect(reason).toContain('remote.hostnames');
+      expect(reason).toContain(bad);
+    }
+  });
+
+  it('canonicalises IPv6 hostnames', () => {
+    expect(ok({ enabled: true, hostnames: ['0:0:0:0:0:0:0:1'] }).hostnames).toEqual(['::1']);
+    expect(ok({ enabled: true, hostnames: ['::1'] }).hostnames).toEqual(['::1']);
   });
 });
 
