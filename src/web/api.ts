@@ -70,6 +70,6 @@ export function imageUrl(unitId: string, sourceId: string, path: string): string
  * Subscribe to server events. All tabs share one connection (see event-hub); it reconnects on its own.
  * Returns an unsubscribe function.
  */
-export function subscribeEvents(onEvent: (e: ServerEvent) => void, onOpen?: () => void): () => void {
-  return subscribeShared(onEvent, onOpen, browserHubDeps());
+export function subscribeEvents(onEvent: (e: ServerEvent) => void, onOpen?: () => void, onClosed?: () => void): () => void {
+  return subscribeShared(onEvent, onOpen, browserHubDeps(), onClosed);
 }

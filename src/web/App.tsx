@@ -41,16 +41,31 @@ export function App() {
   // Request counters so a slow, older response never overwrites a newer one.
   const seq = useRef(new Map<string, number>());
 
-  // Not signed in (401, sign-out, or the server revoked the session): ask which entry this is, then show
-  // the sign-in form (password entry) or the "open the printed URL" message (token entry).
-  const markUnauthorized = useCallback(async () => {
+  // The entry's mode is learned once and kept: a failed lookup must not forget a known mode.
+  const modeRef = useRef<AuthMode | null>(null);
+  const fetchMode = useCallback(async () => {
     try {
-      setAuthMode(await api.authMode());
+      const m = await api.authMode();
+      modeRef.current = m;
+      setAuthMode(m);
     } catch {
-      setAuthMode(null);
+      /* keep what we knew (possibly nothing) */
     }
-    setUnauthorized(true);
   }, []);
+
+  // Not signed in (401, sign-out, or the server revoked the session): drop everything that was loaded and show
+  // the sign-in form (password entry), the "open the printed URL" message (token entry), or, when the mode
+  // is not known, a retry prompt.
+  const markUnauthorized = useCallback(async () => {
+    setSessions([]);
+    setUnits({});
+    setActivity([]);
+    setSelected(null);
+    setLoaded(false);
+    setError(null);
+    setUnauthorized(true);
+    if (!modeRef.current) await fetchMode();
+  }, [fetchMode]);
 
   const reportError = useCallback(
     (e: unknown) => {
@@ -62,14 +77,8 @@ export function App() {
 
   // Learn the entry's mode up front: the Sign out button exists only on the password entry.
   useEffect(() => {
-    void (async () => {
-      try {
-        setAuthMode(await api.authMode());
-      } catch {
-        /* unknown: treat as the token entry */
-      }
-    })();
-  }, []);
+    void fetchMode();
+  }, [fetchMode]);
 
   const signOut = useCallback(async () => {
     try {
@@ -78,11 +87,6 @@ export function App() {
       setError(e instanceof Error ? e.message : String(e));
       return;
     }
-    setSessions([]);
-    setUnits({});
-    setActivity([]);
-    setSelected(null);
-    setLoaded(false);
     await markUnauthorized();
   }, [markUnauthorized]);
 
@@ -111,10 +115,12 @@ export function App() {
       const [list] = await Promise.all([loadSessions(), loadActivity()]);
       await Promise.all(list.map((s) => loadUnits(s.sessionId)));
       setLoaded(true);
+      // The mode lookup at startup may have failed; the API answering is a good moment to try again.
+      if (!modeRef.current) void fetchMode();
     } catch (e) {
       reportError(e);
     }
-  }, [loadSessions, loadActivity, loadUnits, reportError]);
+  }, [loadSessions, loadActivity, loadUnits, reportError, fetchMode]);
 
   // While signed out nothing is loaded and no event stream is held (its lock passes to a tab that is signed in);
   // signing in flips `unauthorized` back and this effect loads the panel and subscribes afresh.
@@ -155,6 +161,8 @@ export function App() {
         if (connectedBefore) void loadAll();
         connectedBefore = true;
       },
+      // The server refused the stream for good (session gone without an auth.revoked event).
+      () => void markUnauthorized(),
     );
     return () => {
       unsubscribe();
@@ -220,11 +228,7 @@ export function App() {
   );
 
   const markSignedIn = async () => {
-    try {
-      setAuthMode(await api.authMode());
-    } catch {
-      /* keep the mode we had */
-    }
+    await fetchMode();
     setUnauthorized(false);
   };
 
@@ -236,6 +240,17 @@ export function App() {
 
   if (unauthorized) {
     if (authMode?.mode === 'password') return <Login onSignedIn={() => void markSignedIn()} />;
+    if (authMode === null) {
+      return (
+        <div className="gate">
+          <h1>Can't reach Agent Console.</h1>
+          <p>The server did not answer.</p>
+          <button type="button" className="btn" onClick={() => void fetchMode()}>
+            Retry
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="gate">
         <h1>Not signed in</h1>

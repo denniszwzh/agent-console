@@ -263,8 +263,8 @@ textarea {
 }
 .sidebar-foot {
   position: sticky;
-  bottom: -2rem;
-  margin: 1rem -0.5rem -2rem;
+  bottom: 0;
+  margin: auto -0.5rem 0;
   padding: 0.6rem 0.75rem;
   background: var(--panel);
   border-top: 1px solid var(--border);
@@ -290,7 +290,12 @@ textarea {
   overflow-y: auto;
   background: var(--panel);
   border-right: 1px solid var(--border);
-  padding: 0.75rem 0.5rem 2rem;
+  padding: 0.75rem 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+}
+.sidebar > .project-list {
+  padding-bottom: 2rem;
 }
 .sidebar-title {
   display: flex;

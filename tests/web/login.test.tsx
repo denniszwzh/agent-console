@@ -10,6 +10,8 @@ class FakeEventSource {
   static all: FakeEventSource[] = [];
   onmessage: ((m: { data: string }) => void) | null = null;
   onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  readyState = 1;
   closed = false;
   constructor(readonly url: string) {
     FakeEventSource.all.push(this);
@@ -151,5 +153,71 @@ describe('sign-in screen', () => {
     source.onmessage?.({ data: JSON.stringify({ type: 'auth.revoked' }) });
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeTruthy();
     expect(source.closed).toBe(true);
+  });
+
+  it('keeps the password mode it knew when /auth/mode fails after a revoke', async () => {
+    server.signedIn = true;
+    const base = passwordEntry();
+    let modeDown = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/auth/mode' && modeDown) throw new TypeError('network down');
+        return base(url, init);
+      }),
+    );
+    render(<App />);
+    await waitFor(() => expect(firstSession()).toBe('one'));
+    modeDown = true;
+    server.signedIn = false;
+    FakeEventSource.all.find((s) => !s.closed)!.onmessage?.({ data: JSON.stringify({ type: 'auth.revoked' }) });
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeTruthy();
+    expect(screen.queryByText('Not signed in')).toBeNull();
+  });
+
+  it('shows a neutral retry state when the mode was never known, and Retry recovers', async () => {
+    let modeDown = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/auth/mode' && modeDown) throw new TypeError('network down');
+        return passwordEntry()(url, init);
+      }),
+    );
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: "Can't reach Agent Console." })).toBeTruthy();
+    expect(screen.queryByText('Not signed in')).toBeNull();
+    modeDown = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeTruthy();
+  });
+
+  it('retries the mode lookup after the API answers when it failed at startup', async () => {
+    server.signedIn = true;
+    let modeDown = true;
+    const base = passwordEntry();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/auth/mode' && modeDown) {
+          modeDown = false;
+          throw new TypeError('network down');
+        }
+        return base(url, init);
+      }),
+    );
+    render(<App />);
+    expect(await screen.findByRole('button', { name: 'Sign out' })).toBeTruthy();
+  });
+
+  it('a refused event stream (no auth.revoked) shows the login form', async () => {
+    server.signedIn = true;
+    render(<App />);
+    await waitFor(() => expect(firstSession()).toBe('one'));
+    server.signedIn = false;
+    const source = FakeEventSource.all.find((s) => !s.closed)!;
+    source.readyState = 2;
+    source.onerror?.();
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeTruthy();
   });
 });

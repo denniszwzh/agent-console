@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { ApiError, api } from '../api.js';
+import { api } from '../api.js';
 
 interface Props {
   /** Called once the server accepted the credentials (the session cookie is set). */
@@ -24,7 +24,7 @@ export function Login({ onSignedIn }: Props) {
       onSignedIn();
     } catch (err) {
       // 401 and 429 carry the server's own wording (the 429 text says how many minutes to wait).
-      setError(err instanceof ApiError || err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);
     }
   };
