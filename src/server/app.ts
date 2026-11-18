@@ -54,6 +54,7 @@ export const COOKIE_NAME = 'ac_token';
 export const SESSION_COOKIE = '__Host-ac_session';
 
 const LOGIN_FAILED = 'Wrong username or password';
+const INVALID_REQUEST = 'Invalid request';
 const REVOKED_EVENT = `data: ${JSON.stringify({ type: 'auth.revoked' })}\n\n`;
 
 function sessionCookie(id: string, maxAgeSec: number): string {
@@ -123,6 +124,7 @@ function listSessions(store: UnitStore, activity: ActivityTracker, meta: Session
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { store, token, port, remote } = deps;
   const bus = deps.bus ?? new EventBus();
+  const ownsActivity = deps.activity === undefined;
   const activity = deps.activity ?? new ActivityTracker(bus);
   const sessionMeta = deps.sessionMeta ?? new SessionMetaService(defaultSessionMetaOptions());
   const app = Fastify();
@@ -190,10 +192,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       return res.ok ? { mode: 'password', signedIn: true, username: res.username } : { mode: 'password', signedIn: false };
     });
 
-    app.post('/auth/login', async (req, reply) => {
+    app.post('/auth/login', {
+      // Unparseable or non-JSON bodies (FST_ERR_CTP_*) get the same 400 as a badly shaped one.
+      // They never reach login(), so they are not counted as failed sign-ins.
+      errorHandler: (err, _req, reply) => {
+        if (typeof err.code === 'string' && err.code.startsWith('FST_ERR_CTP_')) {
+          return reply.code(400).send({ error: INVALID_REQUEST });
+        }
+        throw err;
+      },
+    }, async (req, reply) => {
       const body = req.body as { username?: unknown; password?: unknown } | null | undefined;
       if (typeof body !== 'object' || body === null || typeof body.username !== 'string' || typeof body.password !== 'string') {
-        return reply.code(400).send({ error: 'username and password required' });
+        return reply.code(400).send({ error: INVALID_REQUEST });
       }
       const ua = req.headers['user-agent'];
       const res = await auth.login(body.username, body.password, { ip: req.ip, userAgent: typeof ua === 'string' ? ua : '' });
@@ -203,8 +214,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
       if (res.reason === 'locked') {
         const minutes = Math.ceil(res.retryAfterSec / 60);
+        const unit = minutes === 1 ? 'minute' : 'minutes';
         reply.header('Retry-After', String(res.retryAfterSec));
-        return reply.code(429).send({ error: `Too many failed sign-ins. Try again in ${minutes} minutes.`, retryAfterSec: res.retryAfterSec });
+        return reply.code(429).send({ error: `Too many failed sign-ins. Try again in ${minutes} ${unit}.`, retryAfterSec: res.retryAfterSec });
       }
       return reply.code(401).send({ error: LOGIN_FAILED });
     });
@@ -237,10 +249,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     api.get('/api/events', (req, reply) => {
       let key: string | undefined;
       if (remote) {
-        // Re-check right before registering: a sign-out that landed between the auth hook and
-        // this handler would otherwise leave a stream that no revocation can find.
+        // Defence in depth: re-check the session just before the stream is registered.
         const res = checkSession(req, reply, remote);
-        if (!res.ok || res.key !== requestKeys.get(req)) return reply.code(401).send({ error: 'unauthorized' });
+        if (!res.ok || res.key !== requestKeys.get(req)) {
+          reply.code(401).send({ error: 'unauthorized' });
+          return;
+        }
         key = res.key;
       }
       reply.hijack();
@@ -318,8 +332,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   }
 
   app.addHook('onClose', async () => {
-    // The external entry shares the local entry's tracker, which the local entry closes.
-    if (!remote) activity.close();
+    // Close only what this instance created; an injected tracker belongs to the caller.
+    if (ownsActivity) activity.close();
     stopRevocations?.();
     for (const s of sseClients) s.destroy();
   });

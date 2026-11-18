@@ -154,6 +154,16 @@ describe('remote entry: route protection', () => {
     expect(plainHttp.statusCode).toBe(403);
     const ok = await a.inject({ method: 'GET', url: '/auth/mode', headers: { host: HOST, origin: 'https://ws1.corp:4318' } });
     expect(ok.statusCode).toBe(200);
+
+    // A valid session does not get past a foreign Origin either.
+    const id = await signIn(a);
+    const evilApi = await a.inject({ method: 'GET', url: '/api/sessions', headers: withSession(id, { origin: 'https://evil.example' }) });
+    expect(evilApi.statusCode).toBe(403);
+    const evilLogout = await a.inject({ method: 'POST', url: '/auth/logout', headers: withSession(id, { origin: 'https://evil.example' }) });
+    expect(evilLogout.statusCode).toBe(403);
+    expect(evilLogout.headers['set-cookie']).toBeUndefined();
+    // ...so the session is still signed in.
+    expect((await a.inject({ method: 'GET', url: '/api/sessions', headers: withSession(id, { origin: 'https://ws1.corp:4318' }) })).statusCode).toBe(200);
   });
 
   it('leaves the shared submitter and activity tracker to the local entry', async () => {
@@ -169,6 +179,19 @@ describe('remote entry: route protection', () => {
     app = null;
     expect(setSubmitter).not.toHaveBeenCalled();
     expect(closeActivity).not.toHaveBeenCalled();
+  });
+
+  it('closes an activity tracker it created itself', async () => {
+    const closeActivity = vi.spyOn(ActivityTracker.prototype, 'close');
+    try {
+      const { app: a } = mk();
+      await a.ready();
+      await a.close();
+      app = null;
+      expect(closeActivity).toHaveBeenCalledTimes(1);
+    } finally {
+      closeActivity.mockRestore();
+    }
   });
 
   it('accepts host without port when remote port is 443', async () => {
@@ -225,6 +248,12 @@ describe('remote entry: sign-in', () => {
     expect(body.error).toBe('Too many failed sign-ins. Try again in 15 minutes.');
     expect(locked.headers['retry-after']).toBe(String(body.retryAfterSec));
     expect(locked.headers['set-cookie']).toBeUndefined();
+
+    // Under a minute left: singular.
+    clock += 14 * 60_000 + 30_000;
+    const last = await login(a);
+    expect(last.statusCode).toBe(429);
+    expect(last.json()).toEqual({ error: 'Too many failed sign-ins. Try again in 1 minute.', retryAfterSec: 30 });
   });
 
   it('a wrong username answers the same 401 as a wrong password', async () => {
@@ -236,15 +265,31 @@ describe('remote entry: sign-in', () => {
 
   it('malformed login bodies answer 400', async () => {
     const { app: a } = mk();
-    const post = (payload: unknown, contentType = 'application/json') =>
-      a.inject({ method: 'POST', url: '/auth/login', headers: { host: HOST, 'content-type': contentType }, payload: payload as string });
-    expect((await post({})).statusCode).toBe(400);
-    expect((await post({ username: 1, password: 'x' })).statusCode).toBe(400);
-    expect((await post({ username: USER })).statusCode).toBe(400);
-    expect((await post([USER, PASSWORD])).statusCode).toBe(400);
-    expect((await post('null')).statusCode).toBe(400);
-    expect((await post('not json')).statusCode).toBe(400);
-    expect((await post('username=admin&password=x', 'text/plain')).statusCode).toBe(400);
+    const post = (payload: unknown, contentType: string | null = 'application/json') =>
+      a.inject({
+        method: 'POST',
+        url: '/auth/login',
+        headers: contentType === null ? { host: HOST } : { host: HOST, 'content-type': contentType },
+        payload: payload as string,
+      });
+    const cases: [unknown, string | null][] = [
+      [{}, 'application/json'],
+      [{ username: 1, password: 'x' }, 'application/json'],
+      [{ username: USER }, 'application/json'],
+      [[USER, PASSWORD], 'application/json'],
+      ['null', 'application/json'],
+      ['not json', 'application/json'],
+      ['', 'application/json'],
+      ['username=admin&password=x', 'text/plain'],
+      [`username=${USER}&password=x`, 'application/x-www-form-urlencoded'],
+      ['--b\r\nContent-Disposition: form-data; name="username"\r\n\r\nadmin\r\n--b--', 'multipart/form-data; boundary=b'],
+      ['{"username":"admin","password":"x"}', null],
+    ];
+    for (const [payload, contentType] of cases) {
+      const res = await post(payload, contentType);
+      expect(res.statusCode, `${contentType}: ${JSON.stringify(payload)}`).toBe(400);
+      expect(res.json()).toEqual({ error: 'Invalid request' });
+    }
     // None of these count as failed sign-ins.
     expect((await login(a)).statusCode).toBe(204);
   });
@@ -329,6 +374,19 @@ const until = async (cond: () => boolean, ms: number) => {
 };
 
 describe('remote entry: event stream revocation', () => {
+  it('answers 401 when the session fails the re-check before the stream opens', async () => {
+    const { app: a, auth: ra } = mk();
+    const id = await signIn(a);
+    const real = ra.check.bind(ra);
+    let calls = 0;
+    // The auth hook sees a valid session; the handler's re-check sees it gone (a sign-out in between).
+    const check = vi.spyOn(ra, 'check').mockImplementation((v) => (++calls === 1 ? real(v) : { ok: false }));
+    const res = await a.inject({ method: 'GET', url: '/api/events', headers: withSession(id) });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: 'unauthorized' });
+    expect(check).toHaveBeenCalledTimes(2);
+  });
+
   it('re-issues a due session cookie on the event stream response', async () => {
     const { app: a } = mk();
     const id = await signIn(a);
@@ -363,7 +421,7 @@ describe('remote entry: event stream revocation', () => {
 
       // logout-all (epoch bump from the CLI) closes every remaining stream within the poll interval.
       bumpEpoch();
-      await within(streamB.ended, POLL_MS * 10, 'stream B to end');
+      await within(streamB.ended, 2000, 'stream B to end');
       expect(streamB.data).toContain('data: {"type":"auth.revoked"}\n\n');
       expect((await a.inject({ method: 'GET', url: '/api/sessions', headers: withSession(idB) })).statusCode).toBe(401);
     } finally {
