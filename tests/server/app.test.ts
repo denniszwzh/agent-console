@@ -75,6 +75,17 @@ describe('app auth and host checks', () => {
     expect(next.statusCode).toBe(200);
   });
 
+  it('local auth/mode answers token', async () => {
+    const app = mk();
+    const res = await app.inject({ method: 'GET', url: '/auth/mode', headers: { host: HOST } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ mode: 'token' });
+    const foreign = await app.inject({ method: 'GET', url: '/auth/mode', headers: { host: 'evil.com' } });
+    expect(foreign.statusCode).toBe(403);
+    const login = await app.inject({ method: 'POST', url: '/auth/login', headers: { host: HOST }, payload: { username: 'a', password: 'b' } });
+    expect(login.statusCode).toBe(404);
+  });
+
   it('returns 404 for a missing unit and 500 for a corrupt one', async () => {
     const app = mk();
     const h = { host: HOST, authorization: `Bearer ${TOKEN}` };

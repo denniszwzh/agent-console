@@ -89,6 +89,8 @@ export function App() {
     let connectedBefore = false;
     const unsubscribe = subscribeEvents(
       (e) => {
+        // Handled by the sign-in flow; the session list has not changed.
+        if (e.type === 'auth.revoked') return;
         if (e.type === 'activity.updated') {
           schedule('activity', loadActivity);
           // Names and last-change times come with the session list.

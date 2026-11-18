@@ -151,4 +151,6 @@ export interface SessionActivity {
 /** Notification pushed over SSE (GET /api/events); clients refetch on receipt. */
 export type ServerEvent =
   | { type: 'unit.created' | 'unit.updated'; unitId: string; sessionId: string }
-  | { type: 'activity.updated'; sessionId: string };
+  | { type: 'activity.updated'; sessionId: string }
+  /** Sent on the external entry only, to the streams of a session that was just signed out; the stream then ends. */
+  | { type: 'auth.revoked' };

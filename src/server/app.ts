@@ -4,7 +4,7 @@ import type { ServerResponse } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
-import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type { UnitStore } from './store.js';
 import { EventBus } from './events.js';
 import { projectOf } from './project.js';
@@ -16,6 +16,8 @@ import { submitUnit } from './submit.js';
 import type { ThreadEngine } from './threads.js';
 import { readConfig } from './paths.js';
 import { SessionMetaService, defaultSessionMetaOptions } from './session-meta.js';
+import { allowedHosts, allowedOrigins, type RemoteConfig } from './remote/config.js';
+import type { AuthCheck, RemoteAuth } from './remote/auth.js';
 import type { Config, SessionSummary } from '../shared/types.js';
 
 /** Implemented by the thread engine so ingestion can skip sessions it forked itself. */
@@ -43,9 +45,20 @@ export interface AppDeps {
   sessionMeta?: SessionMetaService;
   /** Directory of the built web UI; defaults to <package>/dist/web. */
   webRoot?: string;
+  /** Present only for the external entry; absent means the local entry (unchanged behaviour). */
+  remote?: { config: RemoteConfig; auth: RemoteAuth };
 }
 
 export const COOKIE_NAME = 'ac_token';
+/** Session cookie of the external entry; `__Host-` makes the browser require Secure, Path=/ and no Domain. */
+export const SESSION_COOKIE = '__Host-ac_session';
+
+const LOGIN_FAILED = 'Wrong username or password';
+const REVOKED_EVENT = `data: ${JSON.stringify({ type: 'auth.revoked' })}\n\n`;
+
+function sessionCookie(id: string, maxAgeSec: number): string {
+  return `${SESSION_COOKIE}=${id}; Secure; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSec}`;
+}
 
 // Resolves to <package>/dist/web from both src/server and dist/server.
 const DEFAULT_WEB_ROOT = fileURLToPath(new URL('../../dist/web/', import.meta.url));
@@ -108,17 +121,42 @@ function listSessions(store: UnitStore, activity: ActivityTracker, meta: Session
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
-  const { store, token, port } = deps;
+  const { store, token, port, remote } = deps;
   const bus = deps.bus ?? new EventBus();
   const activity = deps.activity ?? new ActivityTracker(bus);
   const sessionMeta = deps.sessionMeta ?? new SessionMetaService(defaultSessionMetaOptions());
   const app = Fastify();
   const sseClients = new Set<ServerResponse>();
 
-  const hosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
-  const origins = new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
+  const hosts = remote ? allowedHosts(remote.config) : new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
+  const origins = remote ? allowedOrigins(remote.config) : new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`]);
 
-  const isAuthorized = (req: FastifyRequest): boolean => {
+  // External entry: the session key each authenticated request was checked against, and the
+  // key of every open event stream, so a revoked session's streams can be found and closed.
+  const requestKeys = new WeakMap<FastifyRequest, string>();
+  const streamKeys = new Map<ServerResponse, { key: string; close: () => void }>();
+
+  /** Checks the external entry's session cookie; re-issues the cookie on the reply when the store asks for it. */
+  const checkSession = (req: FastifyRequest, reply: FastifyReply, r: NonNullable<AppDeps['remote']>): AuthCheck => {
+    const id = readCookie(req.headers.cookie, SESSION_COOKIE);
+    let res: AuthCheck;
+    try {
+      res = r.auth.check(id);
+    } catch (e) {
+      req.log.error(e);
+      return { ok: false };
+    }
+    if (res.ok && res.refresh && id !== null) reply.header('Set-Cookie', sessionCookie(id, r.config.sessionDays * 86_400));
+    return res;
+  };
+
+  const isAuthorized = (req: FastifyRequest, reply: FastifyReply): boolean => {
+    if (remote) {
+      // Only the session cookie counts here: the local token (Bearer or ac_token) is never accepted.
+      const res = checkSession(req, reply, remote);
+      if (res.ok) requestKeys.set(req, res.key);
+      return res.ok;
+    }
     const auth = req.headers.authorization;
     if (auth && auth.startsWith('Bearer ') && safeEqual(auth.slice(7), token)) return true;
     const cookie = readCookie(req.headers.cookie, COOKIE_NAME);
@@ -127,33 +165,93 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   // Host/Origin gate: applies to every route, including /auth and unmatched paths.
   app.addHook('onRequest', async (req, reply) => {
-    const host = req.headers.host;
+    const host = remote ? req.headers.host?.toLowerCase() : req.headers.host;
     if (!host || !hosts.has(host)) return reply.code(403).send({ error: 'forbidden host' });
-    const origin = req.headers.origin;
+    const origin = remote ? req.headers.origin?.toLowerCase() : req.headers.origin;
     if (origin !== undefined && !origins.has(origin)) return reply.code(403).send({ error: 'forbidden origin' });
   });
 
-  app.get('/auth', async (req, reply) => {
-    const t = (req.query as { token?: unknown }).token;
-    if (typeof t !== 'string' || !safeEqual(t, token)) return reply.code(401).send({ error: 'invalid token' });
-    reply.header('Set-Cookie', `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/`);
-    return reply.redirect('/', 302);
-  });
+  let stopRevocations: (() => void) | null = null;
+  if (remote) {
+    const { auth, config } = remote;
+    const maxAgeSec = config.sessionDays * 86_400;
+
+    // A signed-out session must not keep receiving events: tell its streams, then end them.
+    stopRevocations = auth.onRevoke((keys) => {
+      for (const [raw, s] of [...streamKeys]) {
+        if (keys !== 'all' && !keys.includes(s.key)) continue;
+        s.close();
+        raw.end(REVOKED_EVENT);
+      }
+    });
+
+    app.get('/auth/mode', async (req, reply) => {
+      const res = checkSession(req, reply, remote);
+      return res.ok ? { mode: 'password', signedIn: true, username: res.username } : { mode: 'password', signedIn: false };
+    });
+
+    app.post('/auth/login', async (req, reply) => {
+      const body = req.body as { username?: unknown; password?: unknown } | null | undefined;
+      if (typeof body !== 'object' || body === null || typeof body.username !== 'string' || typeof body.password !== 'string') {
+        return reply.code(400).send({ error: 'username and password required' });
+      }
+      const ua = req.headers['user-agent'];
+      const res = await auth.login(body.username, body.password, { ip: req.ip, userAgent: typeof ua === 'string' ? ua : '' });
+      if (res.ok) {
+        reply.header('Set-Cookie', sessionCookie(res.id, maxAgeSec));
+        return reply.code(204).send();
+      }
+      if (res.reason === 'locked') {
+        const minutes = Math.ceil(res.retryAfterSec / 60);
+        reply.header('Retry-After', String(res.retryAfterSec));
+        return reply.code(429).send({ error: `Too many failed sign-ins. Try again in ${minutes} minutes.`, retryAfterSec: res.retryAfterSec });
+      }
+      return reply.code(401).send({ error: LOGIN_FAILED });
+    });
+
+    app.post('/auth/logout', async (req, reply) => {
+      const id = readCookie(req.headers.cookie, SESSION_COOKIE);
+      // Unknown or malformed ids are a no-op; a failed write throws (500) and leaves the cookie in place.
+      if (id !== null) auth.logout(id);
+      reply.header('Set-Cookie', sessionCookie('', 0));
+      return reply.code(204).send();
+    });
+  } else {
+    app.get('/auth/mode', async () => ({ mode: 'token' }));
+
+    app.get('/auth', async (req, reply) => {
+      const t = (req.query as { token?: unknown }).token;
+      if (typeof t !== 'string' || !safeEqual(t, token)) return reply.code(401).send({ error: 'invalid token' });
+      reply.header('Set-Cookie', `${COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/`);
+      return reply.redirect('/', 302);
+    });
+  }
 
   // Every API route lives inside this encapsulated plugin, so the auth hook is
   // attached to the routes themselves rather than matched against the raw URL.
   app.register(async (api) => {
     api.addHook('onRequest', async (req, reply) => {
-      if (!isAuthorized(req)) return reply.code(401).send({ error: 'unauthorized' });
+      if (!isAuthorized(req, reply)) return reply.code(401).send({ error: 'unauthorized' });
     });
 
     api.get('/api/events', (req, reply) => {
+      let key: string | undefined;
+      if (remote) {
+        // Re-check right before registering: a sign-out that landed between the auth hook and
+        // this handler would otherwise leave a stream that no revocation can find.
+        const res = checkSession(req, reply, remote);
+        if (!res.ok || res.key !== requestKeys.get(req)) return reply.code(401).send({ error: 'unauthorized' });
+        key = res.key;
+      }
       reply.hijack();
       const raw = reply.raw;
+      const setCookie = reply.getHeader('set-cookie');
       raw.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         Connection: 'keep-alive',
+        // A session cookie re-issued by the auth check; hijacking bypasses Fastify's own headers.
+        ...(setCookie !== undefined ? { 'Set-Cookie': setCookie } : {}),
       });
       raw.write(': connected\n\n');
       sseClients.add(raw);
@@ -166,7 +264,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         clearInterval(heartbeat);
         unsubscribe();
         sseClients.delete(raw);
+        streamKeys.delete(raw);
       };
+      if (key !== undefined) streamKeys.set(raw, { key, close: cleanup });
       raw.on('error', cleanup);
       req.raw.on('close', cleanup);
     });
@@ -193,10 +293,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
     });
 
-    registerHookRoutes(api, { store, bus, config: deps.config ?? readConfig(), forks: deps.forks ?? deps.engine, activity, scanFiles: deps.scanFiles });
+    // Hooks come only from local agents, and the shared engine's submitter is set once, by the local entry.
+    if (!remote) {
+      registerHookRoutes(api, { store, bus, config: deps.config ?? readConfig(), forks: deps.forks ?? deps.engine, activity, scanFiles: deps.scanFiles });
+    }
     if (deps.engine) {
       const codexQueue = deps.codexQueue ?? createCodexQueueRunner();
-      deps.engine.setSubmitter((unitId) => submitUnit({ store, bus, codexQueue }, unitId));
+      if (!remote) deps.engine.setSubmitter((unitId) => submitUnit({ store, bus, codexQueue }, unitId));
       registerUnitRoutes(api, { engine: deps.engine, store, bus, codexQueue });
     }
   });
@@ -215,7 +318,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   }
 
   app.addHook('onClose', async () => {
-    activity.close();
+    // The external entry shares the local entry's tracker, which the local entry closes.
+    if (!remote) activity.close();
+    stopRevocations?.();
     for (const s of sseClients) s.destroy();
   });
   return app;
