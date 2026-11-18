@@ -47,6 +47,8 @@ export interface AppDeps {
   webRoot?: string;
   /** Present only for the external entry; absent means the local entry (unchanged behaviour). */
   remote?: { config: RemoteConfig; auth: RemoteAuth };
+  /** PEM certificate and key; the server speaks HTTPS (HTTP/1.1) when set. */
+  https?: { cert: string; key: string };
 }
 
 export const COOKIE_NAME = 'ac_token';
@@ -127,7 +129,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const ownsActivity = deps.activity === undefined;
   const activity = deps.activity ?? new ActivityTracker(bus);
   const sessionMeta = deps.sessionMeta ?? new SessionMetaService(defaultSessionMetaOptions());
-  const app = Fastify();
+  // Routes and hooks do not depend on the server type, so the HTTPS instance is typed like the HTTP one.
+  const app = deps.https ? (Fastify({ https: deps.https }) as unknown as FastifyInstance) : Fastify();
   const sseClients = new Set<ServerResponse>();
 
   const hosts = remote ? allowedHosts(remote.config) : new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
@@ -332,8 +335,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   }
 
   app.addHook('onClose', async () => {
-    // Close only what this instance created; an injected tracker belongs to the caller.
-    if (ownsActivity) activity.close();
+    // The local entry closes its tracker as it always has; the external entry closes only one it created,
+    // because an injected tracker is shared with the local entry.
+    if (ownsActivity || !remote) activity.close();
     stopRevocations?.();
     for (const s of sseClients) s.destroy();
   });

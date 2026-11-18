@@ -109,3 +109,8 @@ export function allowedHosts(c: RemoteConfig): Set<string> {
 export function allowedOrigins(c: RemoteConfig): Set<string> {
   return new Set([...allowedHosts(c)].map((h) => `https://${h}`));
 }
+
+/** Addresses printed at startup, one per host name (port omitted when it is 443). */
+export function remoteUrls(c: RemoteConfig): string[] {
+  return c.hostnames.map((h) => `https://${hostForm(h)}${c.port === 443 ? '' : `:${c.port}`}/`);
+}
