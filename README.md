@@ -228,7 +228,8 @@ client has to trust the new one again in the same way.
 
 To use a certificate your clients already trust (for example a company one), set both `remote.certFile` and
 `remote.keyFile` to PEM files. Agent Console then uses them as they are, never creates or renews anything, and the
-host names you connect with must be covered by that certificate.
+host names you connect with must be covered by that certificate. Use absolute paths (in JSON, forward slashes or
+escaped backslashes; `~` is not expanded), and restart agent-console after setting `certFile` and `keyFile`.
 
 ### Security notes
 
@@ -241,7 +242,8 @@ host names you connect with must be covered by that certificate.
   is stored (`~/.agent-console/sessions.json`).
 - `agent-console set-password` signs out every device, and so does `agent-console logout-all`, which keeps the
   password. A running server notices either within a few seconds; open panels return to the sign-in screen. The
-  panel's own **Sign out** button ends only that browser's session.
+  panel's own **Sign out** button ends only that browser's session. If a device is lost or you think the session
+  cookie leaked, run `agent-console logout-all`.
 - HTTPS protects the password in transit, but expose the port only to networks you trust (a home or office LAN, or a
   VPN). Do not forward it to the internet.
 
