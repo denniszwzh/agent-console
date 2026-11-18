@@ -102,10 +102,20 @@ describe('SessionStore', () => {
   it('expired sessions are dropped when the file is loaded', () => {
     const old = make().create(1, META);
     t += 31 * DAY;
-    const s = make();
-    expect(s.check(old.id, 1).valid).toBe(false);
+    const s = make(); // loads after the old session expired
+    t -= 31 * DAY; // clock back below expiry: only load can have dropped it
     s.create(1, META);
     expect(fs.readFileSync(file, 'utf8')).not.toContain(old.key);
+    expect(s.check(old.id, 1).valid).toBe(false);
+  });
+
+  it('a failed revoke restores the session so memory matches disk', () => {
+    const s = make();
+    const { id } = s.create(1, META);
+    fs.rmSync(file);
+    fs.mkdirSync(file); // rename onto a directory fails deterministically
+    expect(() => s.revoke(id)).toThrow();
+    expect(s.check(id, 1).valid).toBe(true);
   });
 
   it.each(['', '   ', '{not json', '[]', '{"sessions":"x"}', '{"sessions":[null,1,{"key":5}]}'])(

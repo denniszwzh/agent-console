@@ -74,14 +74,29 @@ export class SessionStore {
     if (refresh) {
       rec.issuedAt = t;
       // Sliding expiry and lastSeen are only persisted on refresh to avoid a write per request.
-      try { this.save(); } catch { /* keep the in-memory session usable */ }
+      try {
+        this.save();
+      } catch (e) {
+        // Keep the in-memory session usable; the next write retries.
+        console.warn(`[remote] could not persist sessions: ${(e as Error).message}`);
+      }
     }
     return { valid: true, key, refresh };
   }
 
   revoke(id: string): void {
     if (typeof id !== 'string') return;
-    if (this.sessions.delete(sha256(id))) this.save();
+    const key = sha256(id);
+    const rec = this.sessions.get(key);
+    if (!rec) return;
+    this.sessions.delete(key);
+    try {
+      this.save();
+    } catch (e) {
+      // Keep memory and disk in agreement: a failed revoke must not look done.
+      this.sessions.set(key, rec);
+      throw e;
+    }
   }
 
   private load(): void {
@@ -106,7 +121,17 @@ export class SessionStore {
     try {
       // Mode 0o600 has no effect on Windows.
       fs.writeFileSync(tmp, JSON.stringify({ sessions: [...this.sessions.values()] }, null, 2), { mode: 0o600 });
-      fs.renameSync(tmp, this.file);
+      // On Windows a reader holding the file open can make rename fail briefly.
+      for (let attempt = 1; ; attempt++) {
+        try {
+          fs.renameSync(tmp, this.file);
+          break;
+        } catch (e) {
+          const code = (e as NodeJS.ErrnoException).code;
+          if (attempt >= 5 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw e;
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+        }
+      }
     } catch (e) {
       fs.rmSync(tmp, { force: true });
       throw e;
