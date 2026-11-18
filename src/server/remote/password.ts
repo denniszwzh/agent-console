@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { dataDir } from '../paths.js';
+import { writeFileAtomic } from './fs-atomic.js';
 
 export interface AuthFile {
   username: string;
@@ -56,26 +57,7 @@ export function readAuthFile(): AuthFile | null {
 }
 
 function writeAuthFile(auth: AuthFile): void {
-  const file = authFilePath();
-  const tmp = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
-  try {
-    // Mode 0o600 has no effect on Windows.
-    fs.writeFileSync(tmp, JSON.stringify(auth, null, 2), { mode: 0o600 });
-    // On Windows a reader holding the file open can make rename fail briefly.
-    for (let attempt = 1; ; attempt++) {
-      try {
-        fs.renameSync(tmp, file);
-        break;
-      } catch (e) {
-        const code = (e as NodeJS.ErrnoException).code;
-        if (attempt >= 5 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw e;
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-      }
-    }
-  } catch (e) {
-    fs.rmSync(tmp, { force: true });
-    throw e;
-  }
+  writeFileAtomic(authFilePath(), JSON.stringify(auth, null, 2));
 }
 
 function derive(

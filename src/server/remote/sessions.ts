@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { writeFileAtomic } from './fs-atomic.js';
 
 export interface SessionMeta { ip: string; userAgent: string }
 export type SessionCheck = { valid: false } | { valid: true; key: string; refresh: boolean };
@@ -117,24 +118,6 @@ export class SessionStore {
   private save(): void {
     const t = this.now();
     for (const [k, r] of this.sessions) if (r.expiresAt <= t) this.sessions.delete(k);
-    const tmp = `${this.file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
-    try {
-      // Mode 0o600 has no effect on Windows.
-      fs.writeFileSync(tmp, JSON.stringify({ sessions: [...this.sessions.values()] }, null, 2), { mode: 0o600 });
-      // On Windows a reader holding the file open can make rename fail briefly.
-      for (let attempt = 1; ; attempt++) {
-        try {
-          fs.renameSync(tmp, this.file);
-          break;
-        } catch (e) {
-          const code = (e as NodeJS.ErrnoException).code;
-          if (attempt >= 5 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw e;
-          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-        }
-      }
-    } catch (e) {
-      fs.rmSync(tmp, { force: true });
-      throw e;
-    }
+    writeFileAtomic(this.file, JSON.stringify({ sessions: [...this.sessions.values()] }, null, 2));
   }
 }
