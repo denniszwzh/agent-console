@@ -113,6 +113,8 @@ export interface Config {
   hardGate: boolean;
   /** Upper bound for one fork run (answer or conclusion), in milliseconds. */
   runTimeoutMs: number;
+  /** Optional password-protected HTTPS entry; validated by resolveRemoteConfig. */
+  remote?: unknown;
 }
 
 /** One row of the session list (GET /api/sessions). */
