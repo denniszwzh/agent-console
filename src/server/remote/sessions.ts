@@ -85,11 +85,12 @@ export class SessionStore {
     return { valid: true, key, refresh };
   }
 
-  revoke(id: string): void {
-    if (typeof id !== 'string') return;
+  /** Returns whether a session existed (and was removed). */
+  revoke(id: string): boolean {
+    if (typeof id !== 'string') return false;
     const key = sha256(id);
     const rec = this.sessions.get(key);
-    if (!rec) return;
+    if (!rec) return false;
     this.sessions.delete(key);
     try {
       this.save();
@@ -98,6 +99,7 @@ export class SessionStore {
       this.sessions.set(key, rec);
       throw e;
     }
+    return true;
   }
 
   private load(): void {

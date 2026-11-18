@@ -134,13 +134,68 @@ describe('RemoteAuth', () => {
     expect(a.check(r.id)).toEqual({ ok: false });
   });
 
-  it('close stops notifications', async () => {
+  it('logout of an unknown id returns null and notifies nothing', () => {
+    const a = make();
+    const listener = vi.fn();
+    a.onRevoke(listener);
+    expect(a.logout('a'.repeat(64))).toBeNull();
+    expect(a.logout('not-an-id')).toBeNull();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('recovers when a read of an existing auth.json fails transiently', async () => {
+    const a = make();
+    bumpEpoch(); // new stamp, so the next call must re-read the file
+    const real = fs.readFileSync;
+    const spy = vi.spyOn(fs, 'readFileSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+    });
+    expect(a.hasPassword()).toBe(false);
+    spy.mockRestore();
+    expect(fs.readFileSync).toBe(real);
+    expect(a.hasPassword()).toBe(true);
+    expect((await login(a)).ok).toBe(true);
+  });
+
+  it("a malformed auth.json emits 'all' once and fails closed", async () => {
+    const a = make();
+    const listener = vi.fn();
+    a.onRevoke(listener);
+    fs.writeFileSync(authFilePath(), '{ not json');
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledWith('all'), { timeout: 2000 });
+    await new Promise((res) => setTimeout(res, 200));
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(a.hasPassword()).toBe(false);
+  });
+
+  it('waits failureDelayMs after a failure, counted before the sleep; locked does not wait', async () => {
+    const a = new RemoteAuth({ sessionDays: 30, pollMs: 60_000, failureDelayMs: 300 });
+    auth = a;
+    const t0 = Date.now();
+    const first = login(a, 'wrong password!!');
+    let settled = false;
+    void first.then(() => { settled = true; });
+    // Burn the other 4 failures in parallel; they queue behind the first.
+    const rest = Array.from({ length: 4 }, () => login(a, 'wrong password!!'));
+    await first;
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(290);
+    expect(settled).toBe(true);
+    await Promise.all(rest);
+    const t1 = Date.now();
+    expect(await login(a)).toMatchObject({ ok: false, reason: 'locked' });
+    expect(Date.now() - t1).toBeLessThan(250);
+  });
+
+  it('close stops the poll and the watcher', async () => {
+    const clear = vi.spyOn(globalThis, 'clearInterval');
     const a = make();
     const listener = vi.fn();
     a.onRevoke(listener);
     a.close();
+    expect(clear).toHaveBeenCalledTimes(1);
+    clear.mockRestore();
     bumpEpoch();
-    await new Promise((res) => setTimeout(res, 150));
+    await new Promise((res) => setTimeout(res, 200));
     expect(listener).not.toHaveBeenCalled();
   });
 });

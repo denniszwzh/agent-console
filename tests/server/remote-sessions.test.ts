@@ -78,7 +78,9 @@ describe('SessionStore', () => {
   it('revoke makes the id invalid', () => {
     const s = make();
     const { id } = s.create(1, META);
-    s.revoke(id);
+    expect(s.revoke(id)).toBe(true);
+    expect(s.revoke(id)).toBe(false);
+    expect(s.revoke('f'.repeat(64))).toBe(false);
     expect(s.check(id, 1)).toEqual({ valid: false });
     expect(make().check(id, 1)).toEqual({ valid: false });
   });

@@ -12,7 +12,7 @@ interface Entry {
 const MAPPED_PREFIX = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i;
 
 // Only the IPv4-mapped form is folded onto its IPv4 address; anything else is kept as given.
-function normalise(ip: string): string {
+export function normaliseIp(ip: string): string {
   const m = MAPPED_PREFIX.exec(ip);
   return m ? m[1] : ip;
 }
@@ -23,7 +23,7 @@ export class LoginLimiter {
   constructor(private readonly now: () => number = Date.now) {}
 
   check(ip: string): LimitCheck {
-    const key = normalise(ip);
+    const key = normaliseIp(ip);
     this.prune(this.now());
     const entry = this.entries.get(key);
     if (entry && entry.lockedUntil > 0) {
@@ -33,7 +33,7 @@ export class LoginLimiter {
   }
 
   fail(ip: string): void {
-    const key = normalise(ip);
+    const key = normaliseIp(ip);
     const t = this.now();
     this.prune(t);
     let entry = this.entries.get(key);
@@ -50,7 +50,7 @@ export class LoginLimiter {
   }
 
   succeed(ip: string): void {
-    this.entries.delete(normalise(ip));
+    this.entries.delete(normaliseIp(ip));
   }
 
   // Drop expired locks and out-of-window failures so the map cannot grow without bound.

@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { dataDir } from '../paths.js';
-import { LoginLimiter } from './limiter.js';
+import { LoginLimiter, normaliseIp } from './limiter.js';
 import { authFilePath, readAuthFile, verifyCredentials, type AuthFile } from './password.js';
 import { SessionStore, type SessionMeta } from './sessions.js';
 
@@ -15,11 +15,6 @@ export type AuthCheck = { ok: false } | { ok: true; key: string; username: strin
 type RevokeListener = (keys: 'all' | string[]) => void;
 
 const ID_RE = /^[0-9a-f]{64}$/;
-const MAPPED_PREFIX = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i;
-
-// Same folding the limiter applies, so one client cannot get two queues.
-const ipKey = (ip: string) => MAPPED_PREFIX.exec(ip)?.[1] ?? ip;
-
 export class RemoteAuth {
   private readonly store: SessionStore;
   private readonly limiter: LoginLimiter;
@@ -65,7 +60,7 @@ export class RemoteAuth {
   async login(username: string, password: string, meta: SessionMeta): Promise<LoginResult> {
     // Attempts from one IP run one after another so parallel guesses cannot all pass the
     // lock check before any failure is counted. The failure delay is served outside the queue.
-    const key = ipKey(meta.ip);
+    const key = normaliseIp(meta.ip);
     const prev = this.chains.get(key) ?? Promise.resolve();
     const run = prev.then(() => this.attempt(username, password, meta));
     const tail = run.catch(() => undefined);
@@ -109,7 +104,7 @@ export class RemoteAuth {
 
   logout(id: string): string | null {
     if (typeof id !== 'string' || !ID_RE.test(id)) return null;
-    this.store.revoke(id);
+    if (!this.store.revoke(id)) return null;
     const key = crypto.createHash('sha256').update(id).digest('hex');
     this.emit([key]);
     return key;
@@ -142,8 +137,10 @@ export class RemoteAuth {
       stamp = `${st.mtimeMs}:${st.size}:${st.ino}`;
     } catch { /* missing */ }
     if (stamp !== this.cacheStamp) {
-      this.cacheStamp = stamp;
       this.cached = stamp === 'missing' ? null : readAuthFile();
+      // A failed read of an existing file may be transient (EMFILE/EBUSY, half-written):
+      // leave the stamp unset so the next call re-reads instead of caching the null.
+      this.cacheStamp = stamp !== 'missing' && this.cached === null ? '' : stamp;
     }
     const epoch = this.cached?.sessionEpoch ?? null;
     if (epoch !== this.lastEpoch) {
