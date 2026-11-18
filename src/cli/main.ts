@@ -252,13 +252,22 @@ export function readHiddenTty(q: string, stdin: TtyInput = process.stdin as TtyI
     };
     const onData = (chunk: Buffer | string) => {
       for (const ch of typeof chunk === 'string' ? chunk : decoder.write(chunk)) {
-        if (esc === 'esc') esc = ch === '[' ? 'csi' : ch === 'O' ? 'ss3' : null;
-        else if (esc === 'ss3') esc = null;
-        else if (esc === 'csi') {
+        // Enter and Ctrl+C always win, even in the middle of an escape sequence.
+        if (ch === '\r' || ch === '\n') return finish();
+        if (ch === '\u0003') return finish(new Error('Cancelled.'));
+        if (esc === 'esc') {
+          if (ch === '[') esc = 'csi';
+          else if (ch === 'O') esc = 'ss3';
+          else esc = null; // not a sequence: treat this character as normal input
+          if (esc !== null) continue;
+        } else if (esc === 'ss3') {
+          esc = null;
+          continue;
+        } else if (esc === 'csi') {
           if (ch >= '@' && ch <= '~') esc = null;
-        } else if (ch === '\u001b') esc = 'esc';
-        else if (ch === '\r' || ch === '\n') return finish();
-        else if (ch === '\u0003') return finish(new Error('Cancelled.'));
+          continue;
+        }
+        if (ch === '\u001b') esc = 'esc';
         else if (ch === '\u007f' || ch === '\b') buf = [...buf].slice(0, -1).join('');
         else if (ch >= ' ') buf += ch;
       }
@@ -271,8 +280,8 @@ export function readHiddenTty(q: string, stdin: TtyInput = process.stdin as TtyI
 }
 
 /** Asks on a TTY. Ctrl+C or EOF rejects with "Cancelled." instead of taking the default. */
-function askTty(prompt: string): Promise<string> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+export function askTty(prompt: string, input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout): Promise<string> {
+  const rl = readline.createInterface({ input, output });
   return new Promise<string>((resolve, reject) => {
     let answered = false;
     rl.once('SIGINT', () => rl.close());

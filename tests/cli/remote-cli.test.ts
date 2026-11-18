@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readHiddenTty, runLogoutAll, runSetPassword, type Prompter } from '../../src/cli/main.js';
+import { PassThrough } from 'node:stream';
+import { askTty, readHiddenTty, runLogoutAll, runSetPassword, type Prompter } from '../../src/cli/main.js';
 import { readAuthFile } from '../../src/server/remote/password.js';
 
 let home: string;
@@ -169,5 +170,64 @@ describe('readHiddenTty', () => {
     t.stdin.emit('data', bytes.subarray(4));
     t.stdin.emit('data', Buffer.from('\r'));
     expect(await p).toBe('é語');
+  });
+});
+
+describe('readHiddenTty escape handling', () => {
+  function run() {
+    const stdin = new EventEmitter() as EventEmitter & Record<string, unknown>;
+    stdin.setRawMode = vi.fn();
+    stdin.pause = vi.fn();
+    stdin.resume = vi.fn();
+    return { stdin, p: readHiddenTty('pw: ', stdin as never, { write: () => true }) };
+  }
+
+  it('Enter ends the line even right after ESC', async () => {
+    const t = run();
+    t.stdin.emit('data', Buffer.from('\x1b\r'));
+    expect(await t.p).toBe('');
+  });
+
+  it('Ctrl+C cancels in the middle of a CSI sequence', async () => {
+    const t = run();
+    t.stdin.emit('data', Buffer.from('ab\x1b[\x03'));
+    await expect(t.p).rejects.toThrow('Cancelled.');
+  });
+
+  it('treats the character after a lone ESC as normal input', async () => {
+    const t = run();
+    t.stdin.emit('data', Buffer.from('\x1bx\r'));
+    expect(await t.p).toBe('x');
+  });
+});
+
+describe('askTty', () => {
+  function tty() {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    Object.assign(output, { isTTY: true });
+    output.resume();
+    return { input: Object.assign(input, { isTTY: true }), output };
+  }
+
+  it('resolves the typed answer', async () => {
+    const t = tty();
+    const p = askTty('Username: ', t.input, t.output);
+    t.input.write('bob\r');
+    expect(await p).toBe('bob');
+  });
+
+  it('rejects on Ctrl+C', async () => {
+    const t = tty();
+    const p = askTty('Username: ', t.input, t.output);
+    t.input.write('\x03');
+    await expect(p).rejects.toThrow('Cancelled.');
+  });
+
+  it('rejects on EOF (Ctrl+D)', async () => {
+    const t = tty();
+    const p = askTty('Username: ', t.input, t.output);
+    t.input.write('\x04');
+    await expect(p).rejects.toThrow('Cancelled.');
   });
 });
