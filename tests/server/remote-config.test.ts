@@ -100,6 +100,19 @@ describe('resolveRemoteConfig tightened validation', () => {
     }
   });
 
+  it('rejects IPv6 hostnames with a zone id without throwing', () => {
+    const reason = invalidReason({ enabled: true, hostnames: ['fe80::1%eth0'] });
+    expect(reason).toContain('remote.hostnames');
+    expect(reason).toContain('fe80::1%eth0');
+  });
+
+  it('rejects sessionDays outside 1..3650 or unsafe', () => {
+    for (const sessionDays of [1e300, 3651]) {
+      expect(invalidReason({ ...base, sessionDays })).toContain('sessionDays');
+    }
+    expect(ok({ ...base, sessionDays: 3650 }).sessionDays).toBe(3650);
+  });
+
   it('canonicalises IPv6 hostnames', () => {
     expect(ok({ enabled: true, hostnames: ['0:0:0:0:0:0:0:1'] }).hostnames).toEqual(['::1']);
     expect(ok({ enabled: true, hostnames: ['::1'] }).hostnames).toEqual(['::1']);

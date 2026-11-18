@@ -38,8 +38,8 @@ export function resolveRemoteConfig(raw: unknown): RemoteConfigResult {
   }
 
   const sessionDays = r.sessionDays ?? DEFAULT_SESSION_DAYS;
-  if (typeof sessionDays !== 'number' || !Number.isInteger(sessionDays) || sessionDays <= 0) {
-    return invalid('remote.sessionDays must be a positive integer');
+  if (typeof sessionDays !== 'number' || !Number.isSafeInteger(sessionDays) || sessionDays < 1 || sessionDays > 3650) {
+    return invalid('remote.sessionDays must be an integer between 1 and 3650');
   }
 
   const rawBindHost = r.bindHost ?? DEFAULT_BIND_HOST;
@@ -57,10 +57,18 @@ export function resolveRemoteConfig(raw: unknown): RemoteConfigResult {
   for (const entry of r.hostnames as string[]) {
     const h = entry.trim().toLowerCase();
     const isV6 = isIP(h) === 6;
-    if (h.includes('/') || (h.includes(':') && !isV6)) {
+    if (h.includes('/') || h.includes('%') || (h.includes(':') && !isV6)) {
       return invalid(`remote.hostnames entry "${entry}" must be a bare host name or IP`);
     }
-    hostnames.push(isV6 ? new URL(`http://[${h}]`).hostname.slice(1, -1) : h);
+    let canonical = h;
+    if (isV6) {
+      try {
+        canonical = new URL(`http://[${h}]`).hostname.slice(1, -1);
+      } catch {
+        return invalid(`remote.hostnames entry "${entry}" must be a bare host name or IP`);
+      }
+    }
+    hostnames.push(canonical);
   }
 
   const hasCert = r.certFile !== undefined;
