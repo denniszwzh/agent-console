@@ -73,29 +73,34 @@ export function Sidebar({ sessions, responding, unitsBySession, selectedSession,
                         <button
                           type="button"
                           className="session-btn"
-                          title={`${s.cwd}\n${s.sessionId}`}
+                          title={`${sessionTitle(s)}\n${s.cwd}\n${s.sessionId}`}
                           aria-current={selected ? 'true' : undefined}
                           onClick={() => onSelect(s.sessionId)}
                         >
                           <span className={`agent-dot agent-${s.agent}`} aria-hidden="true" />
                           <span className="session-name">
                             <span className={`session-project${s.titleSource === 'prompt' ? ' untitled' : ''}`}>{sessionTitle(s)}</span>
+                            {worktree && <span className="session-meta session-worktree">worktree: {worktree}</span>}
                             <span className="session-meta">
-                              {worktree ? `worktree: ${worktree} · ` : ''}
                               {s.agent} · {formatTime(s.lastActivity)}
                             </span>
+                            {/* Badges sit under the name so they never squeeze it. */}
+                            {(responding?.has(s.sessionId) || sessionOpen > 0) && (
+                              <span className="session-badges">
+                                {responding?.has(s.sessionId) && (
+                                  <span className="responding-badge" title="Main session is responding">
+                                    <span className="responding-dot" aria-hidden="true" />
+                                    Responding
+                                  </span>
+                                )}
+                                {sessionOpen > 0 && (
+                                  <span className="open-count" title={`${sessionOpen} ${sessionOpen === 1 ? 'thread' : 'threads'} being answered`}>
+                                    {sessionOpen} answering
+                                  </span>
+                                )}
+                              </span>
+                            )}
                           </span>
-                          {responding?.has(s.sessionId) && (
-                            <span className="responding-badge" title="Main session is responding">
-                              <span className="responding-dot" aria-hidden="true" />
-                              Responding
-                            </span>
-                          )}
-                          {sessionOpen > 0 && (
-                            <span className="open-count" title={`${sessionOpen} ${sessionOpen === 1 ? 'thread' : 'threads'} being answered`}>
-                              {sessionOpen} answering
-                            </span>
-                          )}
                         </button>
                       </li>
                     );

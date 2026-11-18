@@ -58,6 +58,18 @@ export function useUnit(): UnitContextValue {
   return ctx;
 }
 
+/** Threads to unfold so one of them can be shown (a notification was clicked); seq changes per request. */
+export interface Reveal {
+  threadIds: ReadonlySet<string>;
+  seq: number;
+}
+
+export const RevealContext = createContext<Reveal | null>(null);
+
+export function useReveal(): Reveal | null {
+  return useContext(RevealContext);
+}
+
 /** The top-level source (reply or file id) a thread ultimately hangs from. */
 export function rootSourceId(unit: ReviewUnit, thread: Thread): string {
   const byId = new Map(unit.threads.map((t) => [t.id, t]));
