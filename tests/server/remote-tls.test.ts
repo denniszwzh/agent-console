@@ -16,14 +16,16 @@ const cfg = (hostnames: string[], extra: Partial<RemoteConfig> = {}): RemoteConf
 
 describe('loadOrCreateCert', () => {
   let root: string;
-  let dir: string;
+  let n = 0;
   beforeAll(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-tls-'));
-    dir = path.join(root, 'tls');
   });
   afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+  /** A fresh, empty sub-directory per call so every test owns its state. */
+  const sub = (): string => path.join(root, `t${n++}`);
 
   it('creates a self-signed cert whose SAN lists every hostname', async () => {
+    const dir = sub();
     const t0 = new Date();
     const m = await loadOrCreateCert(cfg(['ws1.corp', '10.1.2.3']), { dir, now: () => t0 });
     const x = new crypto.X509Certificate(m.cert);
@@ -42,14 +44,22 @@ describe('loadOrCreateCert', () => {
   });
 
   it('reuses an existing cert when hostnames match (any order) and it is not near expiry', async () => {
+    const dir = sub();
     const a = await loadOrCreateCert(cfg(['ws1.corp', '10.1.2.3']), { dir });
     const b = await loadOrCreateCert(cfg(['10.1.2.3', 'ws1.corp']), { dir });
-    expect(a.regenerated).toBe(false);
+    expect(a.regenerated).toBe(true);
     expect(b.regenerated).toBe(false);
     expect(b.fingerprint256).toBe(a.fingerprint256);
   });
 
+  it('reuses an existing cert for an IPv6 hostname', async () => {
+    const dir = sub();
+    await loadOrCreateCert(cfg(['fe80::1']), { dir });
+    expect((await loadOrCreateCert(cfg(['fe80::1']), { dir })).regenerated).toBe(false);
+  });
+
   it('regenerates when hostnames change', async () => {
+    const dir = sub();
     const before = await loadOrCreateCert(cfg(['ws1.corp', '10.1.2.3']), { dir });
     const after = await loadOrCreateCert(cfg(['ws2.corp', '10.1.2.3']), { dir });
     expect(after.regenerated).toBe(true);
@@ -58,55 +68,68 @@ describe('loadOrCreateCert', () => {
   });
 
   it('regenerates within 30 days of expiry', async () => {
-    const current = await loadOrCreateCert(cfg(['ws2.corp', '10.1.2.3']), { dir });
+    const dir = sub();
+    const current = await loadOrCreateCert(cfg(['ws2.corp']), { dir });
     const expiry = new Date(new crypto.X509Certificate(current.cert).validTo);
     const near = new Date(expiry.getTime() - 29 * 86400_000);
-    const m = await loadOrCreateCert(cfg(['ws2.corp', '10.1.2.3']), { dir, now: () => near });
+    const m = await loadOrCreateCert(cfg(['ws2.corp']), { dir, now: () => near });
     expect(m.regenerated).toBe(true);
     expect(m.fingerprint256).not.toBe(current.fingerprint256);
   });
 
+  it('regenerates when the existing cert is not yet valid', async () => {
+    const dir = sub();
+    const future = new Date(Date.now() + 10 * 86400_000);
+    await loadOrCreateCert(cfg(['ws1.corp']), { dir, now: () => future });
+    expect((await loadOrCreateCert(cfg(['ws1.corp']), { dir })).regenerated).toBe(true);
+  });
+
   it('regenerates instead of throwing when the existing files are malformed', async () => {
-    const d = path.join(root, 'bad');
-    fs.mkdirSync(d, { recursive: true });
-    fs.writeFileSync(path.join(d, 'cert.pem'), 'garbage');
-    fs.writeFileSync(path.join(d, 'key.pem'), 'garbage');
-    const m = await loadOrCreateCert(cfg(['ws1.corp']), { dir: d });
+    const dir = sub();
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'cert.pem'), 'garbage');
+    fs.writeFileSync(path.join(dir, 'key.pem'), 'garbage');
+    const m = await loadOrCreateCert(cfg(['ws1.corp']), { dir });
     expect(m.regenerated).toBe(true);
   });
 
-  it('loads a configured cert and key', async () => {
-    const gen = await loadOrCreateCert(cfg(['ws2.corp', '10.1.2.3']), { dir });
-    const certFile = path.join(root, 'my.crt');
-    const keyFile = path.join(root, 'my.key');
+  /** Generates a pair in a fresh dir and copies it to configurable cert/key files. */
+  async function configuredPair(): Promise<{ certFile: string; keyFile: string; fingerprint256: string }> {
+    const dir = sub();
+    const gen = await loadOrCreateCert(cfg(['ws2.corp']), { dir });
+    const certFile = path.join(dir, 'my.crt');
+    const keyFile = path.join(dir, 'my.key');
     fs.writeFileSync(certFile, gen.cert);
     fs.writeFileSync(keyFile, gen.key);
-    const unused = path.join(root, 'unused');
+    return { certFile, keyFile, fingerprint256: gen.fingerprint256 };
+  }
+
+  it('loads a configured cert and key', async () => {
+    const { certFile, keyFile, fingerprint256 } = await configuredPair();
+    const unused = sub();
     const m = await loadOrCreateCert(cfg(['x.corp'], { certFile, keyFile }), { dir: unused });
     expect(m.source).toBe('configured');
     expect(m.regenerated).toBe(false);
     expect(m.certPath).toBe(certFile);
-    expect(m.fingerprint256).toBe(gen.fingerprint256);
+    expect(m.fingerprint256).toBe(fingerprint256);
     expect(fs.existsSync(unused)).toBe(false);
   });
 
   it('throws a readable error for a missing or malformed configured file, or a mismatched key', async () => {
-    const gen = await loadOrCreateCert(cfg(['ws2.corp', '10.1.2.3']), { dir });
-    const good = path.join(root, 'g.crt');
-    const goodKey = path.join(root, 'g.key');
-    fs.writeFileSync(good, gen.cert);
-    fs.writeFileSync(goodKey, gen.key);
+    const { certFile, keyFile } = await configuredPair();
     const missing = path.join(root, 'nope.crt');
-    await expect(loadOrCreateCert(cfg(['a'], { certFile: missing, keyFile: goodKey }))).rejects.toThrow(missing);
+    await expect(loadOrCreateCert(cfg(['a'], { certFile: missing, keyFile }))).rejects.toThrow(missing);
+    const missingKey = path.join(root, 'nope.key');
+    await expect(loadOrCreateCert(cfg(['a'], { certFile, keyFile: missingKey }))).rejects.toThrow(missingKey);
     const bad = path.join(root, 'bad.crt');
     fs.writeFileSync(bad, 'not a cert');
-    await expect(loadOrCreateCert(cfg(['a'], { certFile: bad, keyFile: goodKey }))).rejects.toThrow(bad);
+    await expect(loadOrCreateCert(cfg(['a'], { certFile: bad, keyFile }))).rejects.toThrow(bad);
     const badKey = path.join(root, 'bad.key');
     fs.writeFileSync(badKey, 'not a key');
-    await expect(loadOrCreateCert(cfg(['a'], { certFile: good, keyFile: badKey }))).rejects.toThrow(badKey);
-    const other = await loadOrCreateCert(cfg(['other.corp']), { dir: path.join(root, 'other') });
+    await expect(loadOrCreateCert(cfg(['a'], { certFile, keyFile: badKey }))).rejects.toThrow(badKey);
+    const other = await loadOrCreateCert(cfg(['other.corp']), { dir: sub() });
     const otherKey = path.join(root, 'other.key');
     fs.writeFileSync(otherKey, other.key);
-    await expect(loadOrCreateCert(cfg(['a'], { certFile: good, keyFile: otherKey }))).rejects.toThrow(otherKey);
+    await expect(loadOrCreateCert(cfg(['a'], { certFile, keyFile: otherKey }))).rejects.toThrow(otherKey);
   });
 });

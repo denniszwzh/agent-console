@@ -26,6 +26,12 @@ function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim() !== '';
 }
 
+/** Lower-case a host name or IP; IPv6 is rewritten to its canonical compressed form. Throws on an unparsable IPv6. */
+export function canonicalHost(host: string): string {
+  const h = host.trim().toLowerCase();
+  return isIP(h) === 6 ? new URL(`http://[${h}]`).hostname.slice(1, -1) : h;
+}
+
 /** Validate the raw `remote` block of config.json. Never throws. */
 export function resolveRemoteConfig(raw: unknown): RemoteConfigResult {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { status: 'disabled' };
@@ -60,15 +66,11 @@ export function resolveRemoteConfig(raw: unknown): RemoteConfigResult {
     if (h.includes('/') || h.includes('%') || (h.includes(':') && !isV6)) {
       return invalid(`remote.hostnames entry "${entry}" must be a bare host name or IP`);
     }
-    let canonical = h;
-    if (isV6) {
-      try {
-        canonical = new URL(`http://[${h}]`).hostname.slice(1, -1);
-      } catch {
-        return invalid(`remote.hostnames entry "${entry}" must be a bare host name or IP`);
-      }
+    try {
+      hostnames.push(canonicalHost(h));
+    } catch {
+      return invalid(`remote.hostnames entry "${entry}" must be a bare host name or IP`);
     }
-    hostnames.push(canonical);
   }
 
   const hasCert = r.certFile !== undefined;

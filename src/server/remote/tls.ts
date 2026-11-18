@@ -2,10 +2,9 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { isIP } from 'node:net';
 import path from 'node:path';
-import selfsigned from 'selfsigned';
 import { dataDir } from '../paths.js';
 import { writeFileAtomic } from './fs-atomic.js';
-import type { RemoteConfig } from './config.js';
+import { canonicalHost, type RemoteConfig } from './config.js';
 
 export interface TlsMaterial {
   cert: string;
@@ -21,18 +20,6 @@ const RENEW_BEFORE_MS = 30 * 24 * 60 * 60 * 1000;
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
-}
-
-function canonicalHost(h: string): string {
-  const host = h.trim().toLowerCase();
-  if (isIP(host) === 6) {
-    try {
-      return new URL(`http://[${host}]`).hostname.slice(1, -1);
-    } catch {
-      return host;
-    }
-  }
-  return host;
 }
 
 /** Host names and IPs listed in the certificate's subjectAltName, canonicalised. */
@@ -97,6 +84,8 @@ function reuseExisting(certPath: string, keyPath: string, hostnames: string[], n
 async function createSelfSigned(hostnames: string[], now: Date, certPath: string, keyPath: string): Promise<TlsMaterial> {
   const notAfter = new Date(now);
   notAfter.setFullYear(notAfter.getFullYear() + VALID_YEARS);
+  // Loaded lazily so local-only startup and the reuse path never import it.
+  const { default: selfsigned } = await import('selfsigned');
   const pems = await selfsigned.generate([{ name: 'commonName', value: hostnames[0]! }], {
     keyType: 'ec',
     curve: 'P-256',
@@ -105,7 +94,7 @@ async function createSelfSigned(hostnames: string[], now: Date, certPath: string
     notAfterDate: notAfter,
     extensions: [
       { name: 'basicConstraints', cA: false },
-      { name: 'keyUsage', digitalSignature: true, keyEncipherment: true },
+      { name: 'keyUsage', digitalSignature: true },
       { name: 'extKeyUsage', serverAuth: true },
       {
         name: 'subjectAltName',
