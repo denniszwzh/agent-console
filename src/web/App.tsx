@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReviewUnit } from '../shared/types.js';
-import { ApiError, api, subscribeEvents, type SessionActivity, type SessionSummary } from './api.js';
+import { ApiError, api, subscribeEvents, type AuthMode, type SessionActivity, type SessionSummary } from './api.js';
 import { ConversationView } from './components/ConversationView.js';
+import { Login } from './components/Login.js';
 import { RespondingBanner } from './components/Responding.js';
 import { SessionSwitcher, useHoldSwitcher } from './components/SessionSwitcher.js';
 import { Sidebar } from './components/Sidebar.js';
@@ -29,6 +30,8 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [unauthorized, setUnauthorized] = useState(false);
+  // How this entry authenticates; null until known (or when the server does not say).
+  const [authMode, setAuthMode] = useState<AuthMode | null>(null);
   const [loaded, setLoaded] = useState(false);
   // Where the page was before a reload; the anchor is used once, for that session's first showing.
   const [restored] = useState(loadViewState);
@@ -38,10 +41,50 @@ export function App() {
   // Request counters so a slow, older response never overwrites a newer one.
   const seq = useRef(new Map<string, number>());
 
-  const reportError = useCallback((e: unknown) => {
-    if (e instanceof ApiError && e.status === 401) setUnauthorized(true);
-    else setError(e instanceof Error ? e.message : String(e));
+  // Not signed in (401, sign-out, or the server revoked the session): ask which entry this is, then show
+  // the sign-in form (password entry) or the "open the printed URL" message (token entry).
+  const markUnauthorized = useCallback(async () => {
+    try {
+      setAuthMode(await api.authMode());
+    } catch {
+      setAuthMode(null);
+    }
+    setUnauthorized(true);
   }, []);
+
+  const reportError = useCallback(
+    (e: unknown) => {
+      if (e instanceof ApiError && e.status === 401) void markUnauthorized();
+      else setError(e instanceof Error ? e.message : String(e));
+    },
+    [markUnauthorized],
+  );
+
+  // Learn the entry's mode up front: the Sign out button exists only on the password entry.
+  useEffect(() => {
+    void (async () => {
+      try {
+        setAuthMode(await api.authMode());
+      } catch {
+        /* unknown: treat as the token entry */
+      }
+    })();
+  }, []);
+
+  const signOut = useCallback(async () => {
+    try {
+      await api.logout();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    setSessions([]);
+    setUnits({});
+    setActivity([]);
+    setSelected(null);
+    setLoaded(false);
+    await markUnauthorized();
+  }, [markUnauthorized]);
 
   const latest = useCallback(<T,>(key: string, load: () => Promise<T>, apply: (v: T) => void) => {
     const n = (seq.current.get(key) ?? 0) + 1;
@@ -73,7 +116,10 @@ export function App() {
     }
   }, [loadSessions, loadActivity, loadUnits, reportError]);
 
+  // While signed out nothing is loaded and no event stream is held (its lock passes to a tab that is signed in);
+  // signing in flips `unauthorized` back and this effect loads the panel and subscribes afresh.
   useEffect(() => {
+    if (unauthorized) return;
     void loadAll();
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
     const schedule = (key: string, run: () => Promise<unknown>) => {
@@ -89,8 +135,10 @@ export function App() {
     let connectedBefore = false;
     const unsubscribe = subscribeEvents(
       (e) => {
-        // Handled by the sign-in flow; the session list has not changed.
-        if (e.type === 'auth.revoked') return;
+        if (e.type === 'auth.revoked') {
+          void markUnauthorized();
+          return;
+        }
         if (e.type === 'activity.updated') {
           schedule('activity', loadActivity);
           // Names and last-change times come with the session list.
@@ -112,7 +160,7 @@ export function App() {
       unsubscribe();
       timers.forEach(clearTimeout);
     };
-  }, [loadAll, loadSessions, loadActivity, loadUnits, reportError]);
+  }, [unauthorized, loadAll, loadSessions, loadActivity, loadUnits, reportError, markUnauthorized]);
 
   // A session that is responding before its first reply has no units yet: list it too, on top.
   const sidebarSessions = useMemo(() => {
@@ -171,6 +219,15 @@ export function App() {
     [loadUnits, reportError],
   );
 
+  const markSignedIn = async () => {
+    try {
+      setAuthMode(await api.authMode());
+    } catch {
+      /* keep the mode we had */
+    }
+    setUnauthorized(false);
+  };
+
   const selectSession = (session: string) => {
     setSelected(session);
     setInitialAnchor(null);
@@ -178,6 +235,7 @@ export function App() {
   };
 
   if (unauthorized) {
+    if (authMode?.mode === 'password') return <Login onSignedIn={() => void markSignedIn()} />;
     return (
       <div className="gate">
         <h1>Not signed in</h1>
@@ -206,6 +264,7 @@ export function App() {
           selectedSession={selected}
           drawer={layout.compact}
           onHide={layout.hide}
+          onSignOut={authMode?.mode === 'password' ? () => void signOut() : undefined}
           onSelect={(session) => {
             selectSession(session);
             // In the drawer, picking a session returns the full screen to the content.

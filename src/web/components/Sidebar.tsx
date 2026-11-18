@@ -16,9 +16,11 @@ interface Props {
   onHide?(): void;
   /** Rendered as an overlay drawer (portrait / narrow layout). */
   drawer?: boolean;
+  /** Present on the password-protected entry: shows a Sign out button at the bottom. */
+  onSignOut?(): void;
 }
 
-export function Sidebar({ sessions, responding, unitsBySession, selectedSession, onSelect, onHide, drawer }: Props) {
+export function Sidebar({ sessions, responding, unitsBySession, selectedSession, onSelect, onHide, drawer, onSignOut }: Props) {
   const [collapsed, setCollapsed] = useState(readCollapsedGroups);
   // Units still loading count as replied, so the groups do not reorder while the page loads.
   const groups = groupSessions(sessions, (id) => {
@@ -106,6 +108,13 @@ export function Sidebar({ sessions, responding, unitsBySession, selectedSession,
           );
         })}
       </ul>
+      {onSignOut && (
+        <div className="sidebar-foot">
+          <button type="button" className="btn ghost small" onClick={onSignOut}>
+            Sign out
+          </button>
+        </div>
+      )}
     </aside>
   );
 }
