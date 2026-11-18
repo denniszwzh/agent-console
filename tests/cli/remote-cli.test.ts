@@ -1,8 +1,9 @@
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runLogoutAll, runSetPassword, type Prompter } from '../../src/cli/main.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readHiddenTty, runLogoutAll, runSetPassword, type Prompter } from '../../src/cli/main.js';
 import { readAuthFile } from '../../src/server/remote/password.js';
 
 let home: string;
@@ -95,5 +96,78 @@ describe('logout-all', () => {
     const logs: string[] = [];
     expect(await runLogoutAll((s) => logs.push(s))).toBe(false);
     expect(logs.join('\n')).toContain('agent-console set-password');
+  });
+});
+
+describe('set-password edge cases', () => {
+  it('rejects an empty username', async () => {
+    const logs: string[] = [];
+    const p: Prompter = { ask: async () => '   ', askHidden: async () => GOOD };
+    expect(await runSetPassword(p, (s) => logs.push(s))).toBe(false);
+    expect(logs.join('\n')).toContain('Username must not be empty.');
+    expect(readAuthFile()).toBeNull();
+  });
+
+  it('reports setPassword failures without throwing', async () => {
+    const logs: string[] = [];
+    // A directory at auth.json makes the atomic write fail.
+    fs.mkdirSync(path.join(home, 'auth.json'));
+    expect(await runSetPassword(fake('alice', [GOOD, GOOD]), (s) => logs.push(s))).toBe(false);
+    expect(logs.length).toBeGreaterThan(0);
+    expect(logs.join('\n')).not.toContain('Password saved');
+  });
+});
+
+describe('readHiddenTty', () => {
+  function fakeTty() {
+    const stdin = new EventEmitter() as EventEmitter & {
+      setRawMode: ReturnType<typeof vi.fn>;
+      pause: ReturnType<typeof vi.fn>;
+      resume: ReturnType<typeof vi.fn>;
+    };
+    stdin.setRawMode = vi.fn();
+    stdin.pause = vi.fn();
+    stdin.resume = vi.fn();
+    const written: string[] = [];
+    const run = () => readHiddenTty('pw: ', stdin as never, { write: (s) => written.push(s) });
+    return { stdin, written, run };
+  }
+
+  it('returns the typed text, handling backspace, and never echoes it', async () => {
+    const t = fakeTty();
+    const p = t.run();
+    t.stdin.emit('data', Buffer.from('abc\b\r'));
+    expect(await p).toBe('ab');
+    expect(t.written.join('')).not.toContain('ab');
+    expect(t.stdin.setRawMode).toHaveBeenLastCalledWith(false);
+    expect(t.stdin.pause).toHaveBeenCalled();
+  });
+
+  it('rejects on Ctrl+C and restores the terminal', async () => {
+    const t = fakeTty();
+    const p = t.run();
+    t.stdin.emit('data', Buffer.from('ab\x03'));
+    await expect(p).rejects.toThrow('Cancelled.');
+    expect(t.stdin.setRawMode).toHaveBeenLastCalledWith(false);
+    expect(t.stdin.pause).toHaveBeenCalled();
+  });
+
+  it('ignores escape sequences, even split across chunks', async () => {
+    const t = fakeTty();
+    const p = t.run();
+    t.stdin.emit('data', Buffer.from('a\x1b[A\x1b[1;5'));
+    t.stdin.emit('data', Buffer.from('Cb\x1bOHc\r'));
+    expect(await p).toBe('abc');
+  });
+
+  it('decodes a multi-byte character split across chunks', async () => {
+    const t = fakeTty();
+    const p = t.run();
+    const bytes = Buffer.from('é語', 'utf8');
+    t.stdin.emit('data', bytes.subarray(0, 1));
+    t.stdin.emit('data', bytes.subarray(1, 4));
+    t.stdin.emit('data', bytes.subarray(4));
+    t.stdin.emit('data', Buffer.from('\r'));
+    expect(await p).toBe('é語');
   });
 });

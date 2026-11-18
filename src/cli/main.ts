@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
+import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 import { addCodexHooks, addHooks, assertRecognisable, HOOK_MARKER, HooksShapeError, removeHooks } from './settings-merge.js';
 import { callServer } from '../hooks/client.js';
@@ -206,58 +207,92 @@ export interface Prompter {
   askHidden(q: string): Promise<string>;
 }
 
+let pipedRl: readline.Interface | undefined;
 let stdinLines: AsyncIterator<string> | undefined;
 
 /** Non-TTY stdin (pipes): one shared line reader, so consecutive prompts do not lose buffered lines. */
 async function readPipedLine(q: string): Promise<string> {
-  stdinLines ??= readline.createInterface({ input: process.stdin })[Symbol.asyncIterator]();
+  if (!stdinLines) {
+    process.stderr.write('(input is not a terminal; it will be visible)\n');
+    pipedRl = readline.createInterface({ input: process.stdin });
+    stdinLines = pipedRl[Symbol.asyncIterator]();
+  }
   process.stdout.write(q);
   const next = await stdinLines.next();
   return next.done ? '' : next.value;
 }
 
-/** Reads a line from a TTY without echoing it. Raw mode is always restored, including on Ctrl+C. */
-function readHiddenTty(q: string): Promise<string> {
+/** Releases piped stdin so the process can exit even when the writer keeps the pipe open. */
+function closePipedInput(): void {
+  pipedRl?.close();
+  pipedRl = undefined;
+  stdinLines = undefined;
+  process.stdin.pause();
+}
+
+export type TtyInput = Pick<NodeJS.ReadStream, 'on' | 'off' | 'pause' | 'resume' | 'setRawMode'>;
+
+/**
+ * Reads a line from a TTY without echoing it. Raw mode is restored on every exit path, including
+ * Ctrl+C. Escape sequences (arrows, Home, End) are ignored; multi-byte input is decoded across chunks.
+ */
+export function readHiddenTty(q: string, stdin: TtyInput = process.stdin as TtyInput, out: { write(s: string): unknown } = process.stdout): Promise<string> {
   return new Promise((resolve, reject) => {
-    const stdin = process.stdin;
+    const decoder = new StringDecoder('utf8');
     let buf = '';
+    // null = plain text; 'esc' = just after ESC; 'csi' = inside ESC [ ...; 'ss3' = after ESC O.
+    let esc: null | 'esc' | 'csi' | 'ss3' = null;
     const finish = (err?: Error) => {
       stdin.off('data', onData);
       stdin.setRawMode(false);
       stdin.pause();
-      process.stdout.write('\n');
+      out.write('\n');
       if (err) reject(err);
       else resolve(buf);
     };
-    const onData = (chunk: Buffer) => {
-      for (const ch of chunk.toString('utf8')) {
-        if (ch === '\r' || ch === '\n') return finish();
-        if (ch === '\u0003') return finish(new Error('Cancelled.'));
-        if (ch === '\u007f' || ch === '\b') buf = [...buf].slice(0, -1).join('');
+    const onData = (chunk: Buffer | string) => {
+      for (const ch of typeof chunk === 'string' ? chunk : decoder.write(chunk)) {
+        if (esc === 'esc') esc = ch === '[' ? 'csi' : ch === 'O' ? 'ss3' : null;
+        else if (esc === 'ss3') esc = null;
+        else if (esc === 'csi') {
+          if (ch >= '@' && ch <= '~') esc = null;
+        } else if (ch === '\u001b') esc = 'esc';
+        else if (ch === '\r' || ch === '\n') return finish();
+        else if (ch === '\u0003') return finish(new Error('Cancelled.'));
+        else if (ch === '\u007f' || ch === '\b') buf = [...buf].slice(0, -1).join('');
         else if (ch >= ' ') buf += ch;
       }
     };
-    process.stdout.write(q);
+    out.write(q);
     stdin.setRawMode(true);
     stdin.resume();
     stdin.on('data', onData);
   });
 }
 
+/** Asks on a TTY. Ctrl+C or EOF rejects with "Cancelled." instead of taking the default. */
+function askTty(prompt: string): Promise<string> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise<string>((resolve, reject) => {
+    let answered = false;
+    rl.once('SIGINT', () => rl.close());
+    rl.once('close', () => {
+      if (answered) return;
+      process.stdout.write('\n');
+      reject(new Error('Cancelled.'));
+    });
+    rl.question(prompt, (a) => {
+      answered = true;
+      rl.close();
+      resolve(a);
+    });
+  });
+}
+
 const defaultPrompter: Prompter = {
   async ask(q, def) {
     const prompt = def ? `${q} [${def}]: ` : `${q}: `;
-    let answer: string;
-    if (process.stdin.isTTY) {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      answer = await new Promise<string>((resolve) => {
-        rl.once('close', () => resolve(''));
-        rl.question(prompt, resolve);
-      });
-      rl.close();
-    } else {
-      answer = await readPipedLine(prompt);
-    }
+    const answer = process.stdin.isTTY ? await askTty(prompt) : await readPipedLine(prompt);
     return answer.trim() || def || '';
   },
   askHidden: (q) => (process.stdin.isTTY ? readHiddenTty(`${q}: `) : readPipedLine(`${q}: `)),
@@ -308,7 +343,13 @@ async function main(): Promise<void> {
   } else if (sub === 'uninstall') {
     await runUninstall(defaultTargets());
   } else if (sub === 'set-password') {
-    if (!(await runSetPassword())) process.exit(1);
+    let ok = false;
+    try {
+      ok = await runSetPassword();
+    } finally {
+      closePipedInput();
+    }
+    if (!ok) process.exit(1);
   } else if (sub === 'logout-all') {
     if (!(await runLogoutAll())) process.exit(1);
   } else if (sub === undefined) {
