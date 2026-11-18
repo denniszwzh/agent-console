@@ -220,4 +220,59 @@ describe('sign-in screen', () => {
     source.onerror?.();
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeTruthy();
   });
+
+  it('never shows the unreachable message while the first mode lookup is still pending', async () => {
+    let answer!: () => void;
+    const gate = new Promise<void>((r) => (answer = r));
+    const base = passwordEntry();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/auth/mode') await gate;
+        return base(url, init);
+      }),
+    );
+    render(<App />);
+    // The first 401 arrives while /auth/mode has not answered yet.
+    await waitFor(() => expect(document.querySelector('.gate[aria-busy="true"]')).not.toBeNull());
+    expect(screen.queryByText("Can't reach Agent Console.")).toBeNull();
+    answer();
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeTruthy();
+  });
+
+  it('Retry shows it is working and a failed retry keeps the message', async () => {
+    let release!: () => void;
+    let gate = Promise.resolve();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === '/auth/mode') {
+          await gate;
+          throw new TypeError('network down');
+        }
+        return json(401, { error: 'Not signed in' });
+      }),
+    );
+    render(<App />);
+    await screen.findByRole('heading', { name: "Can't reach Agent Console." });
+    gate = new Promise<void>((r) => (release = r));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    const busy = await screen.findByRole('button', { name: 'Retrying…' });
+    expect((busy as HTMLButtonElement).disabled).toBe(true);
+    release();
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: "Can't reach Agent Console." })).toBeTruthy();
+  });
+
+  it('a refused stream with the API still answering is not treated as signed out', async () => {
+    server.signedIn = true;
+    render(<App />);
+    await waitFor(() => expect(firstSession()).toBe('one'));
+    const source = FakeEventSource.all.find((s) => !s.closed)!;
+    source.readyState = 2;
+    source.onerror?.();
+    await waitFor(() => expect(server.calls.filter((c) => c === 'GET /api/sessions').length).toBeGreaterThan(1));
+    expect(screen.queryByRole('heading', { name: 'Sign in' })).toBeNull();
+    expect(firstSession()).toBe('one');
+  });
 });

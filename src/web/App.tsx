@@ -43,13 +43,21 @@ export function App() {
 
   // The entry's mode is learned once and kept: a failed lookup must not forget a known mode.
   const modeRef = useRef<AuthMode | null>(null);
+  // A lookup that has not answered yet is not a failure: "can't reach" shows only after one failed.
+  const [modeLookupFailed, setModeLookupFailed] = useState(false);
+  const [modeLookupBusy, setModeLookupBusy] = useState(false);
   const fetchMode = useCallback(async () => {
+    setModeLookupBusy(true);
     try {
       const m = await api.authMode();
       modeRef.current = m;
       setAuthMode(m);
+      setModeLookupFailed(false);
     } catch {
-      /* keep what we knew (possibly nothing) */
+      // Keep what we knew (possibly nothing).
+      setModeLookupFailed(true);
+    } finally {
+      setModeLookupBusy(false);
     }
   }, []);
 
@@ -161,8 +169,10 @@ export function App() {
         if (connectedBefore) void loadAll();
         connectedBefore = true;
       },
-      // The server refused the stream for good (session gone without an auth.revoked event).
-      () => void markUnauthorized(),
+      // The stream ended for good. Signed out only if the API says so (401); any other failure is just an error.
+      () => {
+        api.sessions().catch(reportError);
+      },
     );
     return () => {
       unsubscribe();
@@ -241,12 +251,14 @@ export function App() {
   if (unauthorized) {
     if (authMode?.mode === 'password') return <Login onSignedIn={() => void markSignedIn()} />;
     if (authMode === null) {
+      // Still looking up: show nothing rather than a false "can't reach".
+      if (!modeLookupFailed) return <div className="gate" aria-busy="true" />;
       return (
         <div className="gate">
           <h1>Can't reach Agent Console.</h1>
           <p>The server did not answer.</p>
-          <button type="button" className="btn" onClick={() => void fetchMode()}>
-            Retry
+          <button type="button" className="btn" disabled={modeLookupBusy} onClick={() => void fetchMode()}>
+            {modeLookupBusy ? 'Retrying…' : 'Retry'}
           </button>
         </div>
       );
