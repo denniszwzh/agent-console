@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReviewUnit, ServerEvent, SessionSummary } from '../../src/shared/types.js';
 import { anchorOn, makeThread, makeUnit } from './fixtures.js';
 
@@ -14,6 +14,9 @@ vi.mock('../../src/web/api.js', async (orig) => ({
     sessions: async () => sessions,
     activity: async () => [],
     units: async (sid: string) => unitsBy[sid] ?? [],
+    authMode: async () => ({ mode: 'password', signedIn: true }),
+    login: async () => {},
+    logout: async () => {},
   },
   subscribeEvents: (onEvent: (e: ServerEvent) => void) => {
     emit = onEvent;
@@ -84,5 +87,28 @@ describe('App completion notifications', () => {
     await event({ type: 'unit.created', unitId: 's3-u1', sessionId: 's3' });
     expect(cards()).toHaveLength(1);
     expect(cards()[0].textContent).toContain('three');
+  });
+
+  it('drops notifications when signed out, and does not replay them after signing in again', async () => {
+    render(<App />);
+    await waitFor(() => expect(selectedTitle()).toBe('one'));
+    unitsBy.s2 = [...unitsBy.s2, makeUnit({ id: 's2-u2', sessionId: 's2' })];
+    await event({ type: 'unit.created', unitId: 's2-u2', sessionId: 's2' });
+    expect(cards()).toHaveLength(1);
+
+    await event({ type: 'auth.revoked' });
+    await screen.findByRole('heading', { name: 'Sign in' });
+    expect(cards()).toHaveLength(0);
+
+    // A reply that finished while signed out is part of the fresh load, not news.
+    unitsBy.s1 = [...unitsBy.s1, makeUnit({ id: 's1-u2', sessionId: 's1' })];
+    fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'user' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'a-long-password' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await waitFor(() => expect(selectedTitle()).toBe('one'));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+    });
+    expect(cards()).toHaveLength(0);
   });
 });

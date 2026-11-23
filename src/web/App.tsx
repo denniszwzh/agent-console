@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReviewUnit } from '../shared/types.js';
-import { ApiError, api, subscribeEvents, type SessionActivity, type SessionSummary } from './api.js';
+import { ApiError, api, subscribeEvents, type AuthMode, type SessionActivity, type SessionSummary } from './api.js';
 import { ConversationView } from './components/ConversationView.js';
+import { Login } from './components/Login.js';
 import { Notifications } from './components/Notifications.js';
 import { RespondingBanner } from './components/Responding.js';
 import { SessionSwitcher, useHoldSwitcher } from './components/SessionSwitcher.js';
@@ -32,6 +33,8 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [unauthorized, setUnauthorized] = useState(false);
+  // How this entry authenticates; null until known (or when the server does not say).
+  const [authMode, setAuthMode] = useState<AuthMode | null>(null);
   const [loaded, setLoaded] = useState(false);
   // Finished replies and thread answers waiting to be looked at, oldest first.
   const [notes, setNotes] = useState<Completion[]>([]);
@@ -50,10 +53,67 @@ export function App() {
   // Request counters so a slow, older response never overwrites a newer one.
   const seq = useRef(new Map<string, number>());
 
-  const reportError = useCallback((e: unknown) => {
-    if (e instanceof ApiError && e.status === 401) setUnauthorized(true);
-    else setError(e instanceof Error ? e.message : String(e));
+  // The entry's mode is learned once and kept: a failed lookup must not forget a known mode.
+  const modeRef = useRef<AuthMode | null>(null);
+  // A lookup that has not answered yet is not a failure: "can't reach" shows only after one failed.
+  const [modeLookupFailed, setModeLookupFailed] = useState(false);
+  const [modeLookupBusy, setModeLookupBusy] = useState(false);
+  const fetchMode = useCallback(async () => {
+    setModeLookupBusy(true);
+    try {
+      const m = await api.authMode();
+      modeRef.current = m;
+      setAuthMode(m);
+      setModeLookupFailed(false);
+    } catch {
+      // Keep what we knew (possibly nothing).
+      setModeLookupFailed(true);
+    } finally {
+      setModeLookupBusy(false);
+    }
   }, []);
+
+  // Not signed in (401, sign-out, or the server revoked the session): drop everything that was loaded and show
+  // the sign-in form (password entry), the "open the printed URL" message (token entry), or, when the mode
+  // is not known, a retry prompt.
+  const markUnauthorized = useCallback(async () => {
+    setSessions([]);
+    setUnits({});
+    setActivity([]);
+    setSelected(null);
+    setLoaded(false);
+    setError(null);
+    setNotes([]);
+    setFocus(null);
+    // The next sign-in starts like a fresh page: what finished meanwhile is part of the first load, not news.
+    unitsSeen.current.clear();
+    primed.current = false;
+    setUnauthorized(true);
+    if (!modeRef.current) await fetchMode();
+  }, [fetchMode]);
+
+  const reportError = useCallback(
+    (e: unknown) => {
+      if (e instanceof ApiError && e.status === 401) void markUnauthorized();
+      else setError(e instanceof Error ? e.message : String(e));
+    },
+    [markUnauthorized],
+  );
+
+  // Learn the entry's mode up front: the Sign out button exists only on the password entry.
+  useEffect(() => {
+    void fetchMode();
+  }, [fetchMode]);
+
+  const signOut = useCallback(async () => {
+    try {
+      await api.logout();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    await markUnauthorized();
+  }, [markUnauthorized]);
 
   const latest = useCallback(<T,>(key: string, load: () => Promise<T>, apply: (v: T) => void) => {
     const n = (seq.current.get(key) ?? 0) + 1;
@@ -85,12 +145,17 @@ export function App() {
       await Promise.all(list.map((s) => loadUnits(s.sessionId)));
       primed.current = true;
       setLoaded(true);
+      // The mode lookup at startup may have failed; the API answering is a good moment to try again.
+      if (!modeRef.current) void fetchMode();
     } catch (e) {
       reportError(e);
     }
-  }, [loadSessions, loadActivity, loadUnits, reportError]);
+  }, [loadSessions, loadActivity, loadUnits, reportError, fetchMode]);
 
+  // While signed out nothing is loaded and no event stream is held (its lock passes to a tab that is signed in);
+  // signing in flips `unauthorized` back and this effect loads the panel and subscribes afresh.
   useEffect(() => {
+    if (unauthorized) return;
     void loadAll();
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
     const schedule = (key: string, run: () => Promise<unknown>) => {
@@ -106,6 +171,10 @@ export function App() {
     let connectedBefore = false;
     const unsubscribe = subscribeEvents(
       (e) => {
+        if (e.type === 'auth.revoked') {
+          void markUnauthorized();
+          return;
+        }
         if (e.type === 'activity.updated') {
           schedule('activity', loadActivity);
           // Names and last-change times come with the session list.
@@ -122,12 +191,16 @@ export function App() {
         if (connectedBefore) void loadAll();
         connectedBefore = true;
       },
+      // The stream ended for good. Signed out only if the API says so (401); any other failure is just an error.
+      () => {
+        api.sessions().catch(reportError);
+      },
     );
     return () => {
       unsubscribe();
       timers.forEach(clearTimeout);
     };
-  }, [loadAll, loadSessions, loadActivity, loadUnits, reportError]);
+  }, [unauthorized, loadAll, loadSessions, loadActivity, loadUnits, reportError, markUnauthorized]);
 
   // A session that is responding before its first reply has no units yet: list it too, on top.
   const sidebarSessions = useMemo(() => {
@@ -186,6 +259,11 @@ export function App() {
     [loadUnits, reportError],
   );
 
+  const markSignedIn = async () => {
+    await fetchMode();
+    setUnauthorized(false);
+  };
+
   const selectSession = (session: string) => {
     setSelected(session);
     setInitialAnchor(null);
@@ -208,6 +286,20 @@ export function App() {
   };
 
   if (unauthorized) {
+    if (authMode?.mode === 'password') return <Login onSignedIn={() => void markSignedIn()} />;
+    if (authMode === null) {
+      // Still looking up: show nothing rather than a false "can't reach".
+      if (!modeLookupFailed) return <div className="gate" aria-busy="true" />;
+      return (
+        <div className="gate">
+          <h1>Can't reach Agent Console.</h1>
+          <p>The server did not answer.</p>
+          <button type="button" className="btn" disabled={modeLookupBusy} onClick={() => void fetchMode()}>
+            {modeLookupBusy ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="gate">
         <h1>Not signed in</h1>
@@ -236,6 +328,7 @@ export function App() {
           selectedSession={selected}
           drawer={layout.compact}
           onHide={layout.hide}
+          onSignOut={authMode?.mode === 'password' ? () => void signOut() : undefined}
           onSelect={(session) => {
             selectSession(session);
             // In the drawer, picking a session returns the full screen to the content.

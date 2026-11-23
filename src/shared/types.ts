@@ -113,6 +113,8 @@ export interface Config {
   hardGate: boolean;
   /** Upper bound for one fork run (answer or conclusion), in milliseconds. */
   runTimeoutMs: number;
+  /** Optional password-protected HTTPS entry; validated by resolveRemoteConfig. */
+  remote?: unknown;
 }
 
 /** One row of the session list (GET /api/sessions). */
@@ -149,4 +151,6 @@ export interface SessionActivity {
 /** Notification pushed over SSE (GET /api/events); clients refetch on receipt. */
 export type ServerEvent =
   | { type: 'unit.created' | 'unit.updated'; unitId: string; sessionId: string }
-  | { type: 'activity.updated'; sessionId: string };
+  | { type: 'activity.updated'; sessionId: string }
+  /** Sent on the external entry only, to the streams of a session that was just signed out; the stream then ends. */
+  | { type: 'auth.revoked' };

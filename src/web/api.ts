@@ -8,6 +8,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** Seconds until a locked-out sign-in may be tried again (429 from /auth/login). */
+    readonly retryAfterSec?: number,
   ) {
     super(message);
   }
@@ -23,13 +25,15 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   });
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
+    let retryAfterSec: number | undefined;
     try {
-      const data = (await res.json()) as { error?: unknown };
+      const data = (await res.json()) as { error?: unknown; retryAfterSec?: unknown };
       if (typeof data.error === 'string') message = data.error;
+      if (typeof data.retryAfterSec === 'number') retryAfterSec = data.retryAfterSec;
     } catch {
       /* keep the status text */
     }
-    throw new ApiError(message, res.status);
+    throw new ApiError(message, res.status, retryAfterSec);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -37,7 +41,13 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 
 const enc = encodeURIComponent;
 
+/** How the entry authenticates: the local entry uses a URL token, the external entry a password sign-in. */
+export type AuthMode = { mode: 'token' } | { mode: 'password'; signedIn: boolean; username?: string };
+
 export const api = {
+  authMode: () => request<AuthMode>('GET', '/auth/mode'),
+  login: (username: string, password: string) => request<void>('POST', '/auth/login', { username, password }),
+  logout: () => request<void>('POST', '/auth/logout'),
   sessions: () => request<SessionSummary[]>('GET', '/api/sessions'),
   activity: () => request<SessionActivity[]>('GET', '/api/activity'),
   units: (sessionId: string) => request<ReviewUnit[]>('GET', `/api/units?session=${enc(sessionId)}`),
@@ -60,6 +70,6 @@ export function imageUrl(unitId: string, sourceId: string, path: string): string
  * Subscribe to server events. All tabs share one connection (see event-hub); it reconnects on its own.
  * Returns an unsubscribe function.
  */
-export function subscribeEvents(onEvent: (e: ServerEvent) => void, onOpen?: () => void): () => void {
-  return subscribeShared(onEvent, onOpen, browserHubDeps());
+export function subscribeEvents(onEvent: (e: ServerEvent) => void, onOpen?: () => void, onClosed?: () => void): () => void {
+  return subscribeShared(onEvent, onOpen, browserHubDeps(), onClosed);
 }

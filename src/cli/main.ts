@@ -4,19 +4,24 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
+import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
 import { addCodexHooks, addHooks, assertRecognisable, HOOK_MARKER, HooksShapeError, removeHooks } from './settings-merge.js';
 import { callServer } from '../hooks/client.js';
 import { start } from '../server/main.js';
+import { bumpEpoch, MIN_PASSWORD_LENGTH, readAuthFile, setPassword } from '../server/remote/password.js';
 import { dataDir, ensureToken, readConfig, readServerInfo } from '../server/paths.js';
 
-const USAGE = `Usage: agent-console [install | uninstall]
+const USAGE = `Usage: agent-console [install | uninstall | set-password | logout-all]
 
   (no command)  start the server and open the browser
   install       add the Stop / UserPromptSubmit hooks to ~/.claude/settings.json
                 and the Stop / UserPromptSubmit / Interrupt hooks to ~/.codex/hooks.json
                 (if ~/.codex exists)
-  uninstall     remove the hooks added by install`;
+  uninstall     remove the hooks added by install
+  set-password  set the username and password for the external (remote) entry;
+                signs out existing remote sessions
+  logout-all    sign out every remote session without changing the password`;
 
 function readSettings(file: string): object {
   try {
@@ -197,12 +202,165 @@ export async function launch(deps: Partial<LaunchDeps> = {}): Promise<number | n
   return null;
 }
 
+export interface Prompter {
+  ask(q: string, def?: string): Promise<string>;
+  askHidden(q: string): Promise<string>;
+}
+
+let pipedRl: readline.Interface | undefined;
+let stdinLines: AsyncIterator<string> | undefined;
+
+/** Non-TTY stdin (pipes): one shared line reader, so consecutive prompts do not lose buffered lines. */
+async function readPipedLine(q: string): Promise<string> {
+  if (!stdinLines) {
+    process.stderr.write('(input is not a terminal; it will be visible)\n');
+    pipedRl = readline.createInterface({ input: process.stdin });
+    stdinLines = pipedRl[Symbol.asyncIterator]();
+  }
+  process.stdout.write(q);
+  const next = await stdinLines.next();
+  return next.done ? '' : next.value;
+}
+
+/** Releases piped stdin so the process can exit even when the writer keeps the pipe open. */
+function closePipedInput(): void {
+  pipedRl?.close();
+  pipedRl = undefined;
+  stdinLines = undefined;
+  process.stdin.pause();
+}
+
+export type TtyInput = Pick<NodeJS.ReadStream, 'on' | 'off' | 'pause' | 'resume' | 'setRawMode'>;
+
+/**
+ * Reads a line from a TTY without echoing it. Raw mode is restored on every exit path, including
+ * Ctrl+C. Escape sequences (arrows, Home, End) are ignored; multi-byte input is decoded across chunks.
+ */
+export function readHiddenTty(q: string, stdin: TtyInput = process.stdin as TtyInput, out: { write(s: string): unknown } = process.stdout): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const decoder = new StringDecoder('utf8');
+    let buf = '';
+    // null = plain text; 'esc' = just after ESC; 'csi' = inside ESC [ ...; 'ss3' = after ESC O.
+    let esc: null | 'esc' | 'csi' | 'ss3' = null;
+    const finish = (err?: Error) => {
+      stdin.off('data', onData);
+      stdin.setRawMode(false);
+      stdin.pause();
+      out.write('\n');
+      if (err) reject(err);
+      else resolve(buf);
+    };
+    const onData = (chunk: Buffer | string) => {
+      for (const ch of typeof chunk === 'string' ? chunk : decoder.write(chunk)) {
+        // Enter and Ctrl+C always win, even in the middle of an escape sequence.
+        if (ch === '\r' || ch === '\n') return finish();
+        if (ch === '\u0003') return finish(new Error('Cancelled.'));
+        if (esc === 'esc') {
+          if (ch === '[') esc = 'csi';
+          else if (ch === 'O') esc = 'ss3';
+          else esc = null; // not a sequence: treat this character as normal input
+          if (esc !== null) continue;
+        } else if (esc === 'ss3') {
+          esc = null;
+          continue;
+        } else if (esc === 'csi') {
+          if (ch >= '@' && ch <= '~') esc = null;
+          continue;
+        }
+        if (ch === '\u001b') esc = 'esc';
+        else if (ch === '\u007f' || ch === '\b') buf = [...buf].slice(0, -1).join('');
+        else if (ch >= ' ') buf += ch;
+      }
+    };
+    out.write(q);
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on('data', onData);
+  });
+}
+
+/** Asks on a TTY. Ctrl+C or EOF rejects with "Cancelled." instead of taking the default. */
+export function askTty(prompt: string, input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout): Promise<string> {
+  const rl = readline.createInterface({ input, output });
+  return new Promise<string>((resolve, reject) => {
+    let answered = false;
+    rl.once('SIGINT', () => rl.close());
+    rl.once('close', () => {
+      if (answered) return;
+      process.stdout.write('\n');
+      reject(new Error('Cancelled.'));
+    });
+    rl.question(prompt, (a) => {
+      answered = true;
+      rl.close();
+      resolve(a);
+    });
+  });
+}
+
+const defaultPrompter: Prompter = {
+  async ask(q, def) {
+    const prompt = def ? `${q} [${def}]: ` : `${q}: `;
+    const answer = process.stdin.isTTY ? await askTty(prompt) : await readPipedLine(prompt);
+    return answer.trim() || def || '';
+  },
+  askHidden: (q) => (process.stdin.isTTY ? readHiddenTty(`${q}: `) : readPipedLine(`${q}: `)),
+};
+
+/** Sets the remote username and password. Returns false (nothing written) on invalid input. */
+export async function runSetPassword(p: Prompter = defaultPrompter, log: (s: string) => void = console.log): Promise<boolean> {
+  const existing = readAuthFile();
+  const username = (await p.ask('Username', existing?.username ?? os.userInfo().username)).trim();
+  if (!username) {
+    log('Username must not be empty.');
+    return false;
+  }
+  const password = await p.askHidden('New password');
+  if ([...password.normalize('NFKC')].length < MIN_PASSWORD_LENGTH) {
+    log(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+    return false;
+  }
+  if ((await p.askHidden('Confirm password')) !== password) {
+    log('Passwords do not match.');
+    return false;
+  }
+  try {
+    await setPassword(username, password);
+  } catch (e) {
+    log(e instanceof Error ? e.message : String(e));
+    return false;
+  }
+  log(`Password saved for ${username}.`);
+  if (existing) log('Existing remote sign-ins were signed out.');
+  return true;
+}
+
+/** Invalidates every remote session. The running server notices the auth file change itself. */
+export async function runLogoutAll(log: (s: string) => void = console.log): Promise<boolean> {
+  if (!bumpEpoch()) {
+    log('No remote password is set. Run "agent-console set-password" first.');
+    return false;
+  }
+  log('Signed out all remote sessions.');
+  return true;
+}
+
 async function main(): Promise<void> {
   const sub = process.argv[2];
   if (sub === 'install') {
     await runInstall(defaultTargets());
   } else if (sub === 'uninstall') {
     await runUninstall(defaultTargets());
+  } else if (sub === 'set-password') {
+    let ok = false;
+    try {
+      ok = await runSetPassword();
+    } finally {
+      closePipedInput();
+    }
+    if (!ok) process.exit(1);
+  } else if (sub === 'logout-all') {
+    if (!(await runLogoutAll())) process.exit(1);
   } else if (sub === undefined) {
     const code = await launch();
     if (code !== null) process.exit(code);

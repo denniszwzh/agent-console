@@ -15,8 +15,14 @@ import type { ServerEvent } from '../shared/types.js';
 export interface SourceLike {
   onmessage: ((msg: { data: string }) => void) | null;
   onopen: (() => void) | null;
+  /** Fires on every failure; the browser keeps reconnecting unless `readyState` is CLOSED. */
+  onerror?: (() => void) | null;
+  readonly readyState?: number;
   close(): void;
 }
+
+/** EventSource.CLOSED: the server refused the stream (for example 401) and the browser gave up. */
+const CLOSED = 2;
 
 export interface ChannelLike {
   onmessage: ((msg: { data: unknown }) => void) | null;
@@ -39,7 +45,9 @@ type Relay =
   /** A tab asks whether the shared connection is open. */
   | { kind: 'hello' }
   /** Answer to hello: it is. */
-  | { kind: 'ack' };
+  | { kind: 'ack' }
+  /** The holder's stream ended for good (the server refused it); nobody should expect events. */
+  | { kind: 'closed' };
 
 const NAME = 'agent-console.events';
 const URL = '/api/events';
@@ -53,18 +61,38 @@ function parseEvent(data: string): ServerEvent | undefined {
   }
 }
 
-function subscribeDirect(onEvent: (e: ServerEvent) => void, onOpen: (() => void) | undefined, deps: HubDeps): () => void {
+function subscribeDirect(
+  onEvent: (e: ServerEvent) => void,
+  onOpen: (() => void) | undefined,
+  deps: HubDeps,
+  onClosed: (() => void) | undefined,
+): () => void {
   const source = deps.openSource(URL);
   source.onmessage = (msg) => {
     const e = parseEvent(msg.data);
     if (e) onEvent(e);
   };
   if (onOpen) source.onopen = onOpen;
+  source.onerror = () => {
+    if (source.readyState !== CLOSED) return;
+    source.close();
+    onClosed?.();
+  };
   return () => source.close();
 }
 
-export function subscribeShared(onEvent: (e: ServerEvent) => void, onOpen: (() => void) | undefined, deps: HubDeps): () => void {
-  if (!deps.channel || !deps.lock) return subscribeDirect(onEvent, onOpen, deps);
+/**
+ * `onClosed` runs when the shared connection ends for good (the server refused it, e.g. the session expired).
+ * There is no reconnect loop: the holder closes the stream and releases the lock, so a tab that signs in
+ * again can take over.
+ */
+export function subscribeShared(
+  onEvent: (e: ServerEvent) => void,
+  onOpen: (() => void) | undefined,
+  deps: HubDeps,
+  onClosed?: () => void,
+): () => void {
+  if (!deps.channel || !deps.lock) return subscribeDirect(onEvent, onOpen, deps, onClosed);
   const channel = deps.channel(NAME);
   const abort = new AbortController();
   let closed = false;
@@ -88,6 +116,12 @@ export function subscribeShared(onEvent: (e: ServerEvent) => void, onOpen: (() =
     if (msg.kind === 'event') onEvent(msg.event);
     else if (msg.kind === 'open') opened();
     else if (msg.kind === 'ack' && !connected) opened();
+    else if (msg.kind === 'closed') {
+      // Over for every tab: stop waiting for the lock, so no tab retries a stream the server refuses.
+      closed = true;
+      abort.abort();
+      onClosed?.();
+    }
   };
   channel.postMessage({ kind: 'hello' } satisfies Relay);
 
@@ -108,6 +142,17 @@ export function subscribeShared(onEvent: (e: ServerEvent) => void, onOpen: (() =
           sourceOpen = true;
           opened();
           channel.postMessage({ kind: 'open' } satisfies Relay);
+        };
+        s.onerror = () => {
+          if (s.readyState !== CLOSED) return;
+          s.close();
+          source = null;
+          sourceOpen = false;
+          closed = true;
+          channel.postMessage({ kind: 'closed' } satisfies Relay);
+          onClosed?.();
+          // Let the other tabs hear 'closed' (and leave) before the lock passes on, or the next one would retry.
+          setTimeout(resolve, 0);
         };
       });
     })

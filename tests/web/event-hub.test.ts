@@ -9,7 +9,7 @@ const flush = async () => {
 
 /** One browser: a lock manager, broadcast channels and event sources shared by every "tab" made from it. */
 function browser() {
-  const sources: (SourceLike & { emit: (data: string) => void; open: () => void; closed: boolean })[] = [];
+  const sources: (SourceLike & { emit: (data: string) => void; open: () => void; fail: (readyState: number) => void; closed: boolean })[] = [];
   const channels = new Set<ChannelLike & { name: string }>();
   const queue: { signal: AbortSignal; task: () => Promise<void>; done: (v?: unknown) => void }[] = [];
   let held = false;
@@ -30,6 +30,8 @@ function browser() {
       const s = {
         onmessage: null as SourceLike['onmessage'],
         onopen: null as SourceLike['onopen'],
+        onerror: null as SourceLike['onerror'],
+        readyState: 1,
         closed: false,
         close() {
           s.closed = true;
@@ -39,6 +41,10 @@ function browser() {
         },
         open() {
           s.onopen?.();
+        },
+        fail(readyState: number) {
+          s.readyState = readyState;
+          s.onerror?.();
         },
       };
       sources.push(s);
@@ -78,6 +84,29 @@ function tab(deps: HubDeps) {
 }
 
 describe('subscribeShared', () => {
+  it('a stream the server refuses for good is closed, the lock released, and every tab told once', async () => {
+    const { deps, sources } = browser();
+    const closedA = vi.fn();
+    const closedB = vi.fn();
+    const a = subscribeShared(() => {}, undefined, deps, closedA);
+    const b = subscribeShared(() => {}, undefined, deps, closedB);
+    await flush();
+    sources[0].open();
+    // A transient error (the browser is reconnecting) is not the end.
+    sources[0].fail(0);
+    await flush();
+    expect(closedA).not.toHaveBeenCalled();
+    sources[0].fail(2);
+    await flush();
+    expect(sources[0].closed).toBe(true);
+    expect(closedA).toHaveBeenCalledTimes(1);
+    expect(closedB).toHaveBeenCalledTimes(1);
+    // No reconnect loop: the waiting tab did not open a new connection.
+    expect(sources).toHaveLength(1);
+    a();
+    b();
+  });
+
   it('only one tab opens a connection; every tab gets its events', async () => {
     const { deps, sources } = browser();
     const a = tab(deps);
