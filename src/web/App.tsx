@@ -83,6 +83,11 @@ export function App() {
     setSelected(null);
     setLoaded(false);
     setError(null);
+    setNotes([]);
+    setFocus(null);
+    // The next sign-in starts like a fresh page: what finished meanwhile is part of the first load, not news.
+    unitsSeen.current.clear();
+    primed.current = false;
     setUnauthorized(true);
     if (!modeRef.current) await fetchMode();
   }, [fetchMode]);
