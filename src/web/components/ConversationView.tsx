@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ReviewUnit, SessionActivity, SessionSummary } from '../../shared/types.js';
 import { basename } from '../labels.js';
+import { threadChain, type FocusTarget } from '../notifications.js';
 import { anchorTop, nearBottom, topAnchor, type StreamAnchor } from '../scroll.js';
-import { UnitProvider, rootSourceId, type UnitActions } from '../unit-context.js';
+import { RevealContext, UnitProvider, rootSourceId, type Reveal, type UnitActions } from '../unit-context.js';
 import { ConclusionBar } from './ConclusionBar.js';
 import { RespondingBanner } from './Responding.js';
 import { AddFileButton, SourceTabs, type TabSpec } from './SourceTabs.js';
@@ -16,6 +17,10 @@ const LOAD_MORE_PX = 200;
 /** The reading position is reported at most this often. */
 const ANCHOR_THROTTLE_MS = 300;
 const STREAM = 'stream';
+/** Frames to wait for a notification's target to appear (threads unfold one level per render). */
+const FOCUS_TRIES = 30;
+/** How long the target of a notification stays highlighted. */
+const FLASH_MS = 2000;
 
 interface TempTab {
   id: string;
@@ -36,6 +41,8 @@ interface Props {
   initialAnchor?: StreamAnchor | null;
   /** The reading position (null at the bottom), reported while the conversation tab is shown. */
   onAnchorChange?(anchor: StreamAnchor | null): void;
+  /** A clicked notification: show this turn, or this thread unfolded. */
+  focus?: FocusTarget | null;
 }
 
 const tabId = (unitId: string, sourceId: string) => `${unitId}:${sourceId}`;
@@ -50,7 +57,7 @@ function openCount(unit: ReviewUnit, sourceId: string): number {
  * first, opened at the bottom. Only the newest turn can be reviewed while it is open; its files are
  * tabs, and files of earlier turns open as temporary tabs.
  */
-export function ConversationView({ session, units, actionsFor, navToggle, responding, initialAnchor, onAnchorChange }: Props) {
+export function ConversationView({ session, units, actionsFor, navToggle, responding, initialAnchor, onAnchorChange, focus }: Props) {
   const latest = units[units.length - 1] as ReviewUnit | undefined;
   const [active, setActive] = useState(STREAM);
   const [temps, setTemps] = useState<TempTab[]>([]);
@@ -60,11 +67,14 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
     return at >= 0 ? Math.min(base, at) : base;
   });
   const [newTurn, setNewTurn] = useState(false);
+  const [reveal, setReveal] = useState<Reveal | null>(null);
 
   const streamRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   /** Kept in place while content grows (images, diagrams), until the reader scrolls. */
   const pinned = useRef<'bottom' | StreamAnchor | null>(null);
+  /** A clicked notification's target, held at `viewTop` px below the view's top while `anchor` is the pin. */
+  const focusPin = useRef<{ anchor: StreamAnchor; target: HTMLElement; viewTop: number } | null>(null);
   /** Whether the view was at the bottom before the latest change; decides whether a new turn is followed. */
   const atBottom = useRef(true);
   /** scrollTop we set ourselves, so its scroll event is not taken as the reader's. */
@@ -94,6 +104,13 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
     const el = streamRef.current;
     const p = pinned.current;
     if (!el || !p) return;
+    const fp = focusPin.current;
+    if (fp && fp.anchor === p && fp.target.isConnected) {
+      // Keep the notification's target where it was put, even when its own turn grows around it.
+      const drift = fp.target.getBoundingClientRect().top - el.getBoundingClientRect().top - fp.viewTop;
+      setScroll(el.scrollTop + drift);
+      return;
+    }
     const top = p === 'bottom' ? null : anchorTop(el, p);
     if (top === null) pinned.current = 'bottom';
     setScroll(top ?? el.scrollHeight);
@@ -250,6 +267,65 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
     [select],
   );
 
+  // A notification was clicked: open the place it points to, unfold the thread, and scroll it into view.
+  const focusSeq = focus?.seq;
+  useEffect(() => {
+    if (!focus) return;
+    const list = unitsRef.current;
+    const index = list.findIndex((u) => u.id === focus.unitId);
+    if (index < 0) return;
+    const unit = list[index];
+    const thread = focus.threadId ? unit.threads.find((t) => t.id === focus.threadId) : undefined;
+    const root = thread ? rootSourceId(unit, thread) : unit.reply.id;
+    if (root === unit.reply.id) select(STREAM);
+    else onOpenFile(unit.id, root);
+    if (index === list.length - 1) setNewTurn(false);
+    if (index < firstRef.current) setFirstIndex(index);
+    if (thread) setReveal({ threadIds: new Set(threadChain(unit, thread.id)), seq: focus.seq });
+
+    const find = () =>
+      thread
+        ? [...document.querySelectorAll<HTMLElement>('.conversation [data-thread-id]')].find((e) => e.dataset.threadId === thread.id)
+        : [...document.querySelectorAll<HTMLElement>('.conversation section[data-unit-id]')].find((e) => e.dataset.unitId === unit.id);
+    let tries = 0;
+    let frame = 0;
+    let flashTimer: ReturnType<typeof setTimeout> | undefined;
+    let flashed: HTMLElement | undefined;
+    const attempt = () => {
+      const target = find();
+      if (!target || target.closest('[hidden]')) {
+        if (++tries < FOCUS_TRIES) frame = requestAnimationFrame(attempt);
+        else setReveal(null);
+        return;
+      }
+      // Unfolding is done: threads mounted later (collapsed and reopened by the reader) start as usual.
+      setReveal(null);
+      // Top-aligned: answers are often taller than the view, and the question should show first.
+      target.scrollIntoView({ block: 'start' });
+      const el = streamRef.current;
+      if (el && !el.hidden) {
+        // Hold this text in place while content above it is still rendering, until the reader scrolls.
+        atBottom.current = nearBottom(el);
+        const anchor = topAnchor(el);
+        if (anchor) {
+          pinned.current = anchor;
+          focusPin.current = { anchor, target, viewTop: target.getBoundingClientRect().top - el.getBoundingClientRect().top };
+        }
+      }
+      flashed = target;
+      target.classList.add('flash-target');
+      flashTimer = setTimeout(() => target.classList.remove('flash-target'), FLASH_MS);
+    };
+    frame = requestAnimationFrame(attempt);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (flashTimer) clearTimeout(flashTimer);
+      flashed?.classList.remove('flash-target');
+    };
+    // Only a new request moves the view; later renders must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusSeq]);
+
   const close = (id: string) => {
     setTemps((t) => t.filter((x) => x.id !== id));
     if (active === id) setActive(STREAM);
@@ -285,86 +361,88 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
   const shown = units.slice(firstIndex);
 
   return (
-    <div className="conversation">
-      <header className="conversation-head" title={cwd}>
-        <span className={`agent-badge agent-${agent}`}>{agent}</span>
-        <span className="conversation-project">{basename(session?.project?.root ?? cwd) || cwd}</span>
-        {worktree && <span className="conversation-worktree">worktree: {worktree}</span>}
-      </header>
-      <SourceTabs
-        tabs={tabs}
-        activeId={showingStream ? STREAM : active}
-        onSelect={select}
-        onClose={close}
-        leading={navToggle}
-        trailing={
-          latest?.status === 'open' ? (
-            <UnitProvider unit={latest} actions={actionsFor(latest)}>
-              <AddFileButton
-                onAdding={() => {
-                  awaitingFile.current = latest.files.length;
-                }}
+    <RevealContext.Provider value={reveal}>
+      <div className="conversation">
+        <header className="conversation-head" title={cwd}>
+          <span className={`agent-badge agent-${agent}`}>{agent}</span>
+          <span className="conversation-project">{basename(session?.project?.root ?? cwd) || cwd}</span>
+          {worktree && <span className="conversation-worktree">worktree: {worktree}</span>}
+        </header>
+        <SourceTabs
+          tabs={tabs}
+          activeId={showingStream ? STREAM : active}
+          onSelect={select}
+          onClose={close}
+          leading={navToggle}
+          trailing={
+            latest?.status === 'open' ? (
+              <UnitProvider unit={latest} actions={actionsFor(latest)}>
+                <AddFileButton
+                  onAdding={() => {
+                    awaitingFile.current = latest.files.length;
+                  }}
+                />
+              </UnitProvider>
+            ) : null
+          }
+        />
+        <div
+          className="stream"
+          ref={streamRef}
+          hidden={!showingStream}
+          onScroll={onScroll}
+          onWheel={release}
+          onTouchStart={release}
+          onKeyDown={release}
+          onMouseDown={release}
+        >
+          <div className="stream-content" ref={contentRef}>
+            {firstIndex > 0 ? (
+              <button type="button" className="btn ghost stream-start" onClick={loadMore}>
+                Load earlier turns
+              </button>
+            ) : (
+              units.length > 0 && <div className="stream-start">Conversation started {new Date(units[0].createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', hour12: false })}</div>
+            )}
+            {shown.map((u, i) => (
+              <TurnView
+                key={u.id}
+                unit={u}
+                actions={actionsFor(u)}
+                latest={firstIndex + i === units.length - 1}
+                turnNumber={firstIndex + i + 1}
+                onOpenFile={onOpenFile}
               />
-            </UnitProvider>
-          ) : null
-        }
-      />
-      <div
-        className="stream"
-        ref={streamRef}
-        hidden={!showingStream}
-        onScroll={onScroll}
-        onWheel={release}
-        onTouchStart={release}
-        onKeyDown={release}
-        onMouseDown={release}
-      >
-        <div className="stream-content" ref={contentRef}>
-          {firstIndex > 0 ? (
-            <button type="button" className="btn ghost stream-start" onClick={loadMore}>
-              Load earlier turns
-            </button>
-          ) : (
-            units.length > 0 && <div className="stream-start">Conversation started {new Date(units[0].createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', hour12: false })}</div>
-          )}
-          {shown.map((u, i) => (
-            <TurnView
-              key={u.id}
-              unit={u}
-              actions={actionsFor(u)}
-              latest={firstIndex + i === units.length - 1}
-              turnNumber={firstIndex + i + 1}
-              onOpenFile={onOpenFile}
-            />
-          ))}
-          {units.length === 0 && responding?.prompt && (
-            <div className="turn-prompts">
-              <div className="turn-prompt">
-                <span className="turn-prompt-who">You:</span>
-                <div className="turn-prompt-text">{responding.prompt}</div>
+            ))}
+            {units.length === 0 && responding?.prompt && (
+              <div className="turn-prompts">
+                <div className="turn-prompt">
+                  <span className="you-label turn-prompt-who">You</span>
+                  <div className="turn-prompt-text">{responding.prompt}</div>
+                </div>
               </div>
-            </div>
+            )}
+            {responding && <RespondingBanner activity={responding} unitOpen={latest?.status === 'open'} />}
+          </div>
+          {newTurn && (
+            <button type="button" className="btn primary new-turn" onClick={toBottom}>
+              ↓ New reply
+            </button>
           )}
-          {responding && <RespondingBanner activity={responding} unitOpen={latest?.status === 'open'} />}
         </div>
-        {newTurn && (
-          <button type="button" className="btn primary new-turn" onClick={toBottom}>
-            ↓ New reply
-          </button>
+        {file && fileSource && (
+          <div className="file-pane">
+            <UnitProvider unit={file.unit} actions={actionsFor(file.unit)}>
+              <SourceView key={fileSource.id} source={fileSource} />
+            </UnitProvider>
+          </div>
+        )}
+        {latest && latestReviewable && (
+          <UnitProvider unit={latest} actions={actionsFor(latest)}>
+            <ConclusionBar />
+          </UnitProvider>
         )}
       </div>
-      {file && fileSource && (
-        <div className="file-pane">
-          <UnitProvider unit={file.unit} actions={actionsFor(file.unit)}>
-            <SourceView key={fileSource.id} source={fileSource} />
-          </UnitProvider>
-        </div>
-      )}
-      {latest && latestReviewable && (
-        <UnitProvider unit={latest} actions={actionsFor(latest)}>
-          <ConclusionBar />
-        </UnitProvider>
-      )}
-    </div>
+    </RevealContext.Provider>
   );
 }

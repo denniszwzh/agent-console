@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Thread } from '../../shared/types.js';
 import { THREAD_STATUS_LABELS, firstLine } from '../labels.js';
-import { fire, useUnit } from '../unit-context.js';
+import { fire, useReveal, useUnit } from '../unit-context.js';
 import { BlockView } from './BlockView.js';
 import { Composer } from './Composer.js';
 import { Markdown } from './Markdown.js';
@@ -24,8 +24,15 @@ export function ThreadView({ thread, blockText }: Props) {
   const question = thread.messages.find((m) => m.role === 'user')?.content ?? '';
   const { status } = thread;
 
+  // A notification for this thread (or one under it) was clicked: unfold so it can be shown.
+  const reveal = useReveal();
+  const revealSeq = reveal?.threadIds.has(thread.id) ? reveal.seq : null;
+  useEffect(() => {
+    if (revealSeq !== null) setOpen(true);
+  }, [revealSeq]);
+
   return (
-    <section className={`thread status-${status}`} aria-label="Thread">
+    <section className={`thread status-${status}`} aria-label="Thread" data-thread-id={thread.id}>
       <header className="thread-head">
         <button type="button" className="thread-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
           <span aria-hidden="true">{open ? '▾' : '▸'}</span>
@@ -40,7 +47,8 @@ export function ThreadView({ thread, blockText }: Props) {
           {thread.messages.map((m) =>
             m.role === 'user' ? (
               <div key={m.id} className="msg msg-user">
-                {m.content}
+                <span className="you-label">You</span>
+                <div className="msg-user-text">{m.content}</div>
               </div>
             ) : (
               <div key={m.id} className="msg msg-assistant">

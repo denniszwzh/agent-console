@@ -44,7 +44,7 @@ function Prompts({ prompts, omitted }: { prompts: TurnPrompt[]; omitted: number 
           <DeliveryPrompt key={i} text={p.text} />
         ) : (
           <div key={i} className="turn-prompt">
-            <span className="turn-prompt-who">You:</span>
+            <span className="you-label turn-prompt-who">You</span>
             <PromptText text={p.text} />
           </div>
         ),

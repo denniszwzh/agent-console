@@ -30,6 +30,10 @@
   --agent-codex-soft: var(--ok-soft);
   --shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 4px 16px rgb(0 0 0 / 0.04);
   --radius: 8px;
+  /* The user's own messages (main-session prompts and thread questions). */
+  --you: #5a4fcf;
+  --you-soft: #eceafb;
+  --you-border: #c9c3f2;
   color-scheme: light;
 }
 
@@ -57,6 +61,9 @@
     --agent-claude: #e08a6a;
     --agent-claude-soft: #3a2219;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.25);
+    --you: #ada6f5;
+    --you-soft: #26233f;
+    --you-border: #443e74;
     color-scheme: dark;
   }
 }
@@ -363,7 +370,7 @@ textarea {
   border-radius: 6px;
 }
 .session-btn {
-  align-items: center;
+  align-items: flex-start;
   gap: 0.6rem;
   padding: 0.5rem 0.75rem;
 }
@@ -378,6 +385,7 @@ textarea {
   flex: none;
   width: 0.55rem;
   height: 0.55rem;
+  margin-top: 0.45rem;
   border-radius: 50%;
   background: var(--accent);
 }
@@ -395,9 +403,12 @@ textarea {
 }
 .session-project {
   font-weight: 600;
+  /* Long names wrap (up to three lines) instead of being cut off; the tooltip has the whole name. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 /* A first prompt standing in for a missing session name. */
 .session-project.untitled {
@@ -405,13 +416,19 @@ textarea {
   color: var(--text-soft);
 }
 .session-meta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.session-meta {
   font-size: 0.75rem;
   color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.session-worktree {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+.session-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.2rem;
 }
 .open-count {
   flex: none;
@@ -1112,12 +1129,32 @@ textarea {
   margin: 0.5rem 0;
 }
 .msg-user {
-  padding: 0.45rem 0.75rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
   border-radius: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--you-soft);
+  border: 1px solid var(--you-border);
+  border-left: 4px solid var(--you);
+}
+.msg-user-text {
+  min-width: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-weight: 500;
+}
+/* The "You" tag on the user's own messages. */
+.you-label {
+  flex: none;
+  padding: 0.05rem 0.45rem;
+  border-radius: 4px;
+  background: var(--you);
+  color: var(--surface);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
 }
 .msg-assistant .markdown {
   font-size: 0.95rem;
@@ -1545,16 +1582,16 @@ textarea {
 }
 .turn-prompt {
   display: flex;
-  gap: 0.5rem;
-  padding: 0.55rem 0.75rem;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.6rem 0.85rem;
   border-radius: var(--radius);
-  background: var(--accent-faint);
-  border: 1px solid var(--border);
+  background: var(--you-soft);
+  border: 1px solid var(--you-border);
+  border-left: 4px solid var(--you);
 }
-.turn-prompt-who {
-  flex: none;
-  font-weight: 700;
-  color: var(--text-soft);
+.turn-prompt-text {
+  font-weight: 500;
 }
 .turn-prompt-text {
   white-space: pre-wrap;
@@ -1567,8 +1604,11 @@ textarea {
 }
 .turn-prompt-delivery {
   background: transparent;
-  border-style: dashed;
+  border: 1px dashed var(--border-strong);
   flex-direction: column;
+}
+.turn-prompt-delivery .turn-prompt-text {
+  font-weight: 400;
 }
 .turn-reply > .agent-badge {
   display: inline-block;
@@ -1704,4 +1744,146 @@ textarea {
   border-radius: 6px;
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+/* ---- Notifications ------------------------------------------------------ */
+
+/* Finished replies and thread answers, stacked in the corner until clicked or dismissed. */
+.notifications {
+  position: fixed;
+  right: 1rem;
+  bottom: 5.5rem;
+  /* Below the sidebar drawer and its backdrop (compact layout). */
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(22rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 7rem);
+  overflow-y: auto;
+}
+.notifications-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem 0.25rem 0.75rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.notification {
+  position: relative;
+  display: flex;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--ok);
+  box-shadow: var(--shadow);
+  animation: notification-in 0.18s ease-out;
+}
+.notification-failed {
+  border-left-color: var(--danger);
+}
+.notification-open {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.55rem 0.5rem 0.6rem 0.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+.notification-open:hover {
+  background: var(--accent-faint);
+}
+.notification-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.notification-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--ok);
+}
+.notification-failed .notification-label {
+  color: var(--danger);
+}
+.notification-time {
+  flex: none;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.notification-session {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notification-text {
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.notification-close {
+  flex: none;
+  align-self: flex-start;
+  padding: 0.3rem 0.55rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.notification-close:hover {
+  color: var(--text);
+}
+@keyframes notification-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+}
+/* Room above a turn or thread scrolled to from a notification. */
+.turn,
+.thread {
+  scroll-margin-top: 0.75rem;
+}
+/* The place a clicked notification led to. */
+.flash-target {
+  animation: flash-target 2s ease-out;
+}
+@keyframes flash-target {
+  0%,
+  40% {
+    box-shadow: 0 0 0 3px var(--you);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notification,
+  .flash-target {
+    animation: none;
+  }
+  .flash-target {
+    box-shadow: 0 0 0 3px var(--you);
+  }
 }

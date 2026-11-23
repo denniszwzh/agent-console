@@ -17,7 +17,7 @@ describe('TurnView', () => {
     const section = container.querySelector('section.turn')!;
     expect(section.getAttribute('data-unit-id')).toBe('unit-1');
     const text = section.textContent!;
-    expect(text).toContain('You:');
+    expect(text).toContain('You');
     expect(text.indexOf('幫我寫計畫')).toBeLessThan(text.indexOf('First paragraph.'));
   });
 
