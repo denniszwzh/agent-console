@@ -26,6 +26,9 @@
 //     still match each other.
 //   - All other text: letters become x / X (CJK characters become 字), digits become 0;
 //     spaces, line breaks and punctuation stay. The same text always masks the same way.
+//   - Ids that tie the transcript to an account, organization or remote bridge (ownerAccountUuid,
+//     ownerOrganizationUuid, bridgeSessionId, ...) become placeholders such as
+//     00000000-0000-4000-8000-000000000001 or cse_redacted2; the same id always gets the same one.
 //   - Strings that hold JSON (for example Codex tool arguments) are parsed and handled the same way.
 //   - Embedded images become a 1x1 PNG.
 import fs from 'node:fs';
@@ -45,6 +48,9 @@ const ENUM_VALUE = /^[A-Za-z0-9_.:@+-]{1,80}$/;
 /** Keys that hold identifiers; values that look like one are kept. */
 const ID_KEY = /(^id$|Id$|_id$|^uuid$|Uuid$|^parentUuid$|^session$|^thread$)/;
 const ID_VALUE = /^[A-Za-z0-9_-]{1,100}$/;
+/** Keys whose id ties the transcript to an account, an organization or a remote bridge: replaced. */
+const ACCOUNT_KEY = /^(?:owner|account|organization|org)\w*(?:Uuid|Id|_uuid|_id)$|^(?:accountUuid|organizationUuid|bridgeSessionId)$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/;
 /** Keys whose string value is a path even when it is relative. */
 const PATH_KEYS = new Set([
@@ -87,7 +93,18 @@ const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYA
 
 export function createSanitizer({ maxText = 300 } = {}) {
   const segments = new Map();
+  const accountIds = new Map(); // original account/org/bridge id -> replacement
   const kept = new Map(); // key -> Set of verbatim values (for the review list)
+
+  /** Same id, same replacement; a UUID stays UUID-shaped and a "cse_"-style prefix stays. */
+  function accountId(v) {
+    if (!accountIds.has(v)) {
+      const n = String(accountIds.size + 1);
+      const prefix = /^[a-z]+_/.exec(v)?.[0] ?? '';
+      accountIds.set(v, UUID.test(v) ? `00000000-0000-4000-8000-${n.padStart(12, '0')}` : `${prefix}redacted${n}`);
+    }
+    return accountIds.get(v);
+  }
 
   function note(key, value) {
     if (!kept.has(key)) kept.set(key, new Set());
@@ -171,6 +188,7 @@ export function createSanitizer({ maxText = 300 } = {}) {
 
   function string(s, key, parent) {
     if (ISO_TIME.test(s)) return s;
+    if (key && ACCOUNT_KEY.test(key) && ID_VALUE.test(s)) return accountId(s);
     if (key && ID_KEY.test(key) && ID_VALUE.test(s)) return s;
     if (key && ENUM_KEYS.has(key) && ENUM_VALUE.test(s)) {
       note(key, s);
@@ -217,7 +235,7 @@ export function createSanitizer({ maxText = 300 } = {}) {
     }
   }
 
-  return { value, line, sanitizePath, report: () => ({ kept, segmentCount: segments.size }) };
+  return { value, line, sanitizePath, report: () => ({ kept, segmentCount: segments.size, accountIdCount: accountIds.size }) };
 }
 
 function parseArgs(argv) {
@@ -256,8 +274,8 @@ function main() {
     records = lines.filter((l) => l.trim()).length;
   }
   fs.writeFileSync(output, out);
-  const { kept, segmentCount } = s.report();
-  console.log(`Wrote ${output}: ${records} record(s), ${segmentCount} distinct path name(s) replaced.`);
+  const { kept, segmentCount, accountIdCount } = s.report();
+  console.log(`Wrote ${output}: ${records} record(s), ${segmentCount} distinct path name(s) replaced, ${accountIdCount} account/organization/bridge id(s) replaced.`);
   console.log('Kept as-is (besides ids and timestamps); check that nothing here is private:');
   for (const [k, vals] of [...kept].sort(([a], [b]) => a.localeCompare(b))) {
     const list = [...vals].sort();

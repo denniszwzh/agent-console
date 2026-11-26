@@ -106,6 +106,24 @@ describe('sanitize-transcript removes private content', () => {
     expect(out).toEqual({ ...rec, message: { ...rec.message, content: [{ ...rec.message.content[0], input: { command: 'xxx /xxx/xxxxx' } }] } });
   });
 
+  it('replaces account, organization and bridge ids consistently, keeping their shape', () => {
+    const s = createSanitizer() as Sanitizer;
+    const account = '1a2b3c4d-1111-4222-8333-444455556666';
+    const org = '9f8e7d6c-aaaa-4bbb-8ccc-ddddeeeeffff';
+    const bridge = 'cse_01ExampleBridgeSession99';
+    const rec = { type: 'bridge-session', sessionId: 'abc-123', bridgeSessionId: bridge, ownerAccountUuid: account, ownerOrganizationUuid: org };
+    const a = s.value(rec);
+    const b = s.value({ ...rec, accountUuid: account, organizationUuid: org });
+    const out = JSON.stringify([a, b]);
+    for (const v of [account, org, bridge, 'ExampleBridge']) expect(out).not.toContain(v);
+    expect(a.sessionId).toBe('abc-123');
+    expect(a.ownerAccountUuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(a.ownerAccountUuid).not.toBe(a.ownerOrganizationUuid);
+    expect(a.bridgeSessionId).toMatch(/^cse_/);
+    // The same id always gets the same replacement, under any of these keys.
+    expect(b).toEqual({ ...a, accountUuid: a.ownerAccountUuid, organizationUuid: a.ownerOrganizationUuid });
+  });
+
   it('maps path names consistently (case-insensitively) and keeps roots, extensions, agent folders and dates', () => {
     const s = createSanitizer() as Sanitizer;
     const a = s.value({ cwd: 'C:\\Users\\Dennis\\code\\secret-app' });
