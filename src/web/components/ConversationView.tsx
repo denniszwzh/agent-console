@@ -6,6 +6,7 @@ import { narrower, readingWidthStyle, rootRemPx, wider, widthShortcut, type Read
 import { anchorTop, nearBottom, topAnchor, type StreamAnchor } from '../scroll.js';
 import { RevealContext, UnitProvider, rootSourceId, type Reveal, type UnitActions } from '../unit-context.js';
 import { ConclusionBar } from './ConclusionBar.js';
+import { ReadingWidthHandles } from './ReadingWidthHandles.js';
 import { RespondingBanner } from './Responding.js';
 import { AddFileButton, SourceTabs, type TabSpec } from './SourceTabs.js';
 import { SourceView } from './SourceView.js';
@@ -472,6 +473,7 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
               </button>
             )}
           </div>
+          {onReadingWidthChange && <ReadingWidthHandles streamRef={streamRef} width={readingWidth} onAdjustStart={holdPlace} onChange={onReadingWidthChange} />}
         </div>
         {file && fileSource && (
           <div className="file-pane">

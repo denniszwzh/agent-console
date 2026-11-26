@@ -1684,6 +1684,55 @@ textarea {
 .stream-frame[hidden] {
   display: none;
 }
+/* Reading-width handles: faint while the pointer is over the conversation, hidden on touch screens. */
+.reading-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 6px;
+  border-radius: 3px;
+  cursor: col-resize;
+  touch-action: none;
+  opacity: 0;
+  background: var(--border);
+  transition: opacity 0.15s;
+}
+.stream-frame:hover .reading-handle {
+  opacity: 0.6;
+}
+.reading-handle:hover,
+.reading-handle.active {
+  opacity: 1;
+  background: var(--muted);
+}
+.reading-label {
+  position: absolute;
+  top: 0.75rem;
+  z-index: 6;
+  transform: translateX(calc(-100% - 0.4rem));
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+body.reading-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+@media (hover: none) {
+  .reading-handle {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reading-handle {
+    transition: none;
+  }
+}
 .stream-content {
   max-width: var(--reading-max, none);
   margin-inline: auto;
