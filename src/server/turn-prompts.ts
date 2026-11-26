@@ -11,7 +11,7 @@ export const MAX_TURN_PROMPTS = 5;
  * them is not something the user typed. Typed prompts can start with `<` too (pasted content in the
  * desktop app is wrapped in `<pasted_content>`), so this is a list, not a "starts with <" rule.
  */
-const INJECTED_TAGS = [
+export const INJECTED_TAGS = [
   'system-reminder',
   'task-notification',
   'command-name',
