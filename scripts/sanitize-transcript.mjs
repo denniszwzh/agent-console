@@ -16,9 +16,9 @@
 //   - Identifiers (session ids, uuids, tool call ids) and ISO timestamps. They are random or
 //     dates, and the parsers match records by them.
 //   - The markers Agent Console's parsers look for: injected tags such as <system-reminder>,
-//     <pasted_content>, "[Request interrupted by user", "# AGENTS.md instructions", apply_patch
-//     headers ("*** Update File: ..."), the conclusion hand-back sentence, and the words
-//     rejected / failed / blocked.
+//     <pasted_content>, <agent-message>, "[Request interrupted by user", "# AGENTS.md instructions",
+//     "Another Claude session sent a message:", apply_patch headers ("*** Update File: ..."),
+//     the conclusion hand-back sentence, and the words rejected / failed / blocked.
 // What changes:
 //   - Paths: the drive or root, the separators, file extensions and numeric folder names stay;
 //     every other folder or file name becomes d1, d2, ... The same name (compared
@@ -66,13 +66,16 @@ const KEEP_SEGMENTS = new Set([
 /** Rollout and transcript file names are built from ids and dates only. */
 const KEEP_FILE = /^(?:rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-[A-Za-z0-9-]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 
-/** Same list as INJECTED_TAGS in src/server/turn-prompts.ts (a test checks), plus pasted_content. */
+/**
+ * Same list as INJECTED_TAGS in src/server/turn-prompts.ts (a test checks), plus pasted_content and
+ * agent-message (a message from another session; see previewOf in src/server/activity.ts).
+ */
 export const INJECTED_TAGS = [
   'system-reminder', 'task-notification', 'command-name', 'command-message', 'command-args',
   'local-command-stdout', 'local-command-stderr', 'local-command-caveat', 'environment_context',
   'turn_aborted', 'subagent_notification', 'skill', 'user_instructions', 'bash-input', 'bash-stdout',
   'bash-stderr', 'ide_opened_file', 'ide_selection', 'ide_diagnostics', 'user-memory-input',
-  'pasted_content',
+  'pasted_content', 'agent-message',
 ];
 /** Text fragments kept verbatim inside masked text. */
 const PROTECTED = new RegExp(
@@ -80,6 +83,7 @@ const PROTECTED = new RegExp(
     `</?(?:${INJECTED_TAGS.join('|')})(?=[\\s>])[^>]*>`,
     '\\[Request interrupted by user[^\\]\\n]*\\]?',
     '# AGENTS\\.md instructions',
+    'Another Claude session sent a message:',
     '\\*\\*\\* (?:Begin Patch|End Patch|End of File)',
     '\\b(?:rejected|failed|blocked)\\b',
   ].join('|'),

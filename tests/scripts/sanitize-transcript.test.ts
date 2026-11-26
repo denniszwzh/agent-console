@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error plain ESM script without type declarations
 import { createSanitizer, INJECTED_TAGS as SCRIPT_TAGS } from '../../scripts/sanitize-transcript.mjs';
 import { isCodexInstruction } from '../../src/agents/codex.js';
+import { previewOf } from '../../src/server/activity.js';
 import { findChangedFilesCodex } from '../../src/server/rollout.js';
 import { findChangedFilesClaude } from '../../src/server/transcript.js';
 import { cleanPromptText, INJECTED_TAGS, readUserPrompts } from '../../src/server/turn-prompts.js';
@@ -172,6 +173,14 @@ describe('sanitize-transcript removes private content', () => {
     ]);
     expect(lines).toContain('[...]');
     expect(out).not.toMatch(/private|notes|line/);
+  });
+
+  it('keeps messages from other sessions and task notices recognisable', () => {
+    const peer = one({ t: 'Another Claude session sent a message: <agent-message from="s2">Done with the build</agent-message>' }).t;
+    expect(peer).not.toContain('build');
+    expect(previewOf(peer)).toBe('Message from another session');
+    expect(previewOf(one({ t: '<agent-message>hi</agent-message>' }).t)).toBe('Message from another session');
+    expect(previewOf(one({ t: '<task-notification>Task 7 finished</task-notification>' }).t)).toBe('Background task finished');
   });
 
   it('keeps the conclusion hand-back sentence recognisable', () => {
