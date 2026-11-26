@@ -302,8 +302,8 @@ describe('reading width', () => {
   const frame = () => document.querySelector<HTMLElement>('.stream-frame')!;
   const alt = (code: string, over: Record<string, unknown> = {}) => fireEvent.keyDown(window, { code, altKey: true, ...over });
   /**
-   * Gives the innermost first element of turn `index` a box crossing the view's top edge (every other
-   * box is empty in jsdom), with its top at `top()` px below the view's top; its ancestors span the edge.
+   * Gives the innermost first element of turn `index` a 20px box with its top at `top()` px from the
+   * view's top (every other box is empty in jsdom); its ancestors span the edge.
    */
   const crossing = (index: number, top: () => number) => {
     let leaf = sections()[index];
@@ -386,11 +386,62 @@ describe('reading width', () => {
     );
     view(turns(10), { readingWidth: null, onReadingWidthChange: vi.fn() });
     scrollTo(420);
-    let top = 30;
+    let top = -10;
     crossing(3, () => top);
     alt('BracketLeft');
     // Narrower lines make the text above it in the same reply taller: it moves 100px down.
+    top = 90;
+    act(() => observers.forEach((cb) => cb()));
+    expect(stream().scrollTop).toBe(520);
+  });
+
+  it('holds the next block when the top edge falls in the gap above it', () => {
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    view(turns(10), { readingWidth: null, onReadingWidthChange: vi.fn() });
+    scrollTo(420);
+    const turn = sections()[3];
+    turn.getBoundingClientRect = () => ({ top: -500, bottom: 1500, left: 0, right: 0, width: 0, height: 2000, x: 0, y: -500, toJSON: () => ({}) });
+    const block = turn.firstElementChild as HTMLElement;
+    expect(getComputedStyle(block).display).toBe('block');
+    let top = 30;
+    block.getBoundingClientRect = () => ({ top, bottom: top + 20, left: 0, right: 0, width: 0, height: 20, x: 0, y: top, toJSON: () => ({}) });
+    alt('BracketLeft');
     top = 130;
+    act(() => observers.forEach((cb) => cb()));
+    expect(stream().scrollTop).toBe(520);
+  });
+
+  it('holds the paragraph crossing the top edge, not inline code further down in it', () => {
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    view(turns(10), { readingWidth: null, onReadingWidthChange: vi.fn() });
+    scrollTo(420);
+    let shift = 0;
+    const paragraph = crossing(3, () => -10 + shift);
+    const code = paragraph.appendChild(document.createElement('code'));
+    code.getBoundingClientRect = () => ({ top: 60 + 3 * shift, bottom: 80 + 3 * shift, left: 0, right: 0, width: 0, height: 20, x: 0, y: 60 + 3 * shift, toJSON: () => ({}) });
+    alt('BracketLeft');
+    // The paragraph moves 100px down; the code three lines further into it moves 300px as its lines rewrap.
+    shift = 100;
     act(() => observers.forEach((cb) => cb()));
     expect(stream().scrollTop).toBe(520);
   });
@@ -404,7 +455,7 @@ describe('reading width', () => {
     scrollTo(420);
     let calls = 0;
     // Measured once when the key is pressed, then after the text rewrapped 100px further down.
-    crossing(3, () => (calls++ === 0 ? 30 : 130));
+    crossing(3, () => (calls++ === 0 ? -10 : 90));
     alt('BracketLeft');
     expect(stream().scrollTop).toBe(520);
   });

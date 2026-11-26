@@ -262,13 +262,22 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
         // Not into diagrams (SVG): an HTML box is held.
         if (!(child instanceof HTMLElement)) continue;
         const box = child.getBoundingClientRect();
-        if (box.bottom > top) {
+        if (box.bottom <= top) continue;
+        if (box.top <= top) {
+          // Crosses the edge: look inside it.
           next = child;
+        } else if (!getComputedStyle(child).display.startsWith('inline')) {
+          // The edge falls in the gap above this block: hold the block. (Inline code or a link further
+          // down a paragraph is not held; the paragraph crossing the edge already is.)
+          target = child;
           targetTop = box.top;
-          break;
         }
+        if (next) {
+          target = next;
+          targetTop = box.top;
+        }
+        break;
       }
-      if (next) target = next;
       parent = next;
     }
     focusPin.current = target ? { anchor, target, viewTop: targetTop - top } : null;
@@ -506,7 +515,7 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
               </button>
             )}
           </div>
-          {onReadingWidthChange && <ReadingWidthHandles streamRef={streamRef} width={readingWidth} onAdjustStart={holdPlace} onChange={onReadingWidthChange} />}
+          {onReadingWidthChange && <ReadingWidthHandles streamRef={streamRef} width={readingWidth} onAdjustStart={holdPlace} onChange={onReadingWidthChange} onReaderScroll={release} />}
         </div>
         {file && fileSource && (
           <div className="file-pane">

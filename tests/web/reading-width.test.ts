@@ -41,6 +41,9 @@ describe('reading width logic', () => {
     expect(widthFromDrag(-400, 16, 100)).toBe(50);
     expect(widthFromDrag(100, 16, 100)).toBe(24);
     expect(widthFromDrag(2000, 16, 100)).toBe(100);
+    // At the edge the visible width is returned unrounded, so callers can tell it from a set width.
+    expect(widthFromDrag(2000, 16, 62.6875)).toBe(62.6875);
+    expect(widthFromDrag(2000, 16, 20)).toBe(24);
   });
 
   it('recognises the shortcuts by physical key, not with Ctrl (AltGr) or in text fields', () => {

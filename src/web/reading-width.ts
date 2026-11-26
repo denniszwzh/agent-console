@@ -59,10 +59,15 @@ export function wider(stored: ReadingWidth, availableRem: number): ReadingWidth 
   return tidy(Math.min(stored + READING_STEP_REM, availableRem));
 }
 
-/** The column width for a pointer `distancePx` from the column's centre (both edges move together). */
+/**
+ * The column width for a pointer `distancePx` from the column's centre (both edges move together). At or
+ * past the edge the visible width is returned unrounded: rounding it to half a rem could land just below
+ * the window width and read as a set width instead of "full width".
+ */
 export function widthFromDrag(distancePx: number, remPx: number, availableRem: number): number {
   const rem = (2 * Math.abs(distancePx)) / remPx;
-  return tidy(Math.min(rem, Math.max(MIN_READING_REM, availableRem)));
+  const edge = Math.max(MIN_READING_REM, availableRem);
+  return rem >= edge ? edge : tidy(rem);
 }
 
 function isTextField(target: EventTarget | null): boolean {

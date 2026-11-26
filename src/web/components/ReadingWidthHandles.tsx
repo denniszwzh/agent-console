@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject, type WheelEvent as ReactWheelEvent } from 'react';
 import { rootRemPx, widthFromDrag, type ReadingWidth } from '../reading-width.js';
 
 /** Width of each handle, in pixels. */
@@ -13,6 +13,8 @@ interface Props {
   /** Called once when a drag or double-click starts, before the width changes. */
   onAdjustStart(): void;
   onChange(width: ReadingWidth): void;
+  /** The reader scrolled with the wheel over a handle (the conversation is scrolled for them). */
+  onReaderScroll?(): void;
 }
 
 const TITLE = 'Drag to change the reading width. Double-click for full width. Alt+[ / Alt+] / Alt+0';
@@ -21,7 +23,7 @@ const TITLE = 'Drag to change the reading width. Double-click for full width. Al
  * Handles on both edges of the reading column. Dragging either one moves both edges. While dragging,
  * the width is set on the stream directly (once per frame) and saved only when the pointer is released.
  */
-export function ReadingWidthHandles({ streamRef, width, onAdjustStart, onChange }: Props) {
+export function ReadingWidthHandles({ streamRef, width, onAdjustStart, onChange, onReaderScroll }: Props) {
   const [available, setAvailable] = useState(0);
   const [drag, setDrag] = useState<number | null>(null);
   const dragRef = useRef<number | null>(null);
@@ -109,6 +111,15 @@ export function ReadingWidthHandles({ streamRef, width, onAdjustStart, onChange 
     onChange(null);
   };
 
+  // The handles sit over the conversation but outside it, so the wheel would not reach it by itself.
+  const onWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
+    const el = streamRef.current;
+    if (!el) return;
+    onReaderScroll?.();
+    const unit = e.deltaMode === 1 ? rootRemPx() * 1.5 : e.deltaMode === 2 ? el.clientHeight : 1;
+    el.scrollBy({ left: e.deltaX * unit, top: e.deltaY * unit });
+  };
+
   const label = drag === null ? null : drag * rem >= available ? 'Full width' : `${drag} rem`;
 
   return (
@@ -128,6 +139,7 @@ export function ReadingWidthHandles({ streamRef, width, onAdjustStart, onChange 
           onPointerCancel={onPointerEnd}
           onLostPointerCapture={onPointerEnd}
           onDoubleClick={onDoubleClick}
+          onWheel={onWheel}
         />
       ))}
       {label && (

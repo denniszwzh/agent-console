@@ -6,18 +6,20 @@ import { ReadingWidthHandles } from '../../src/web/components/ReadingWidthHandle
 import type { ReadingWidth } from '../../src/web/reading-width.js';
 
 /* jsdom has no layout: the stream is 1000px wide at x = 0, which is 62.5rem at the 16px root font size. */
-function setup(width: ReadingWidth) {
+function setup(width: ReadingWidth, px = 1000) {
   const stream = document.createElement('div');
-  Object.defineProperty(stream, 'clientWidth', { configurable: true, get: () => 1000 });
-  stream.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 500, width: 1000, height: 500, x: 0, y: 0, toJSON: () => ({}) });
+  Object.defineProperty(stream, 'clientWidth', { configurable: true, get: () => px });
+  stream.getBoundingClientRect = () => ({ left: 0, top: 0, right: px, bottom: 500, width: px, height: 500, x: 0, y: 0, toJSON: () => ({}) });
   document.body.appendChild(stream);
   const streamRef = createRef<HTMLDivElement>() as { current: HTMLDivElement | null };
   streamRef.current = stream;
   const onAdjustStart = vi.fn();
   const onChange = vi.fn();
-  render(<ReadingWidthHandles streamRef={streamRef} width={width} onAdjustStart={onAdjustStart} onChange={onChange} />);
+  const onReaderScroll = vi.fn();
+  stream.scrollBy = vi.fn() as unknown as typeof stream.scrollBy;
+  render(<ReadingWidthHandles streamRef={streamRef} width={width} onAdjustStart={onAdjustStart} onChange={onChange} onReaderScroll={onReaderScroll} />);
   const [left, right] = screen.getAllByRole('separator');
-  return { stream, left, right, onAdjustStart, onChange };
+  return { stream, left, right, onAdjustStart, onChange, onReaderScroll };
 }
 
 beforeEach(() => {
@@ -98,6 +100,23 @@ describe('ReadingWidthHandles', () => {
     fireEvent.pointerMove(wide.right, { pointerId: 1, clientX: 1100 });
     fireEvent.pointerUp(wide.right, { pointerId: 1 });
     expect(wide.onChange).not.toHaveBeenCalled();
+  });
+
+  it('dragging to the edge keeps full width when the window is not a whole number of half rems', () => {
+    // 1003px = 62.6875rem: rounding the width to half a rem must not turn the edge into a stored 62.5rem.
+    const { right, onChange } = setup(null, 1003);
+    fireEvent.pointerDown(right, { button: 0, pointerId: 1, pointerType: 'mouse', clientX: 1000 });
+    fireEvent.pointerMove(right, { pointerId: 1, clientX: 1100 });
+    expect(screen.getByText('Full width')).toBeTruthy();
+    fireEvent.pointerUp(right, { pointerId: 1 });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('the mouse wheel over a handle scrolls the conversation', () => {
+    const { stream, left, onReaderScroll } = setup(40);
+    fireEvent.wheel(left, { deltaX: 0, deltaY: 120 });
+    expect(onReaderScroll).toHaveBeenCalledTimes(1);
+    expect(stream.scrollBy).toHaveBeenCalledWith({ left: 0, top: 120 });
   });
 
   it('losing the pointer capture ends the drag', () => {
