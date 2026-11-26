@@ -249,8 +249,41 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
       return;
     }
     const anchor = topAnchor(el);
-    if (anchor) pinned.current = anchor;
+    if (!anchor) return;
+    pinned.current = anchor;
+    // A turn and an offset drift inside a long reply as its lines rewrap: hold the innermost element
+    // crossing the view's top edge in place instead, the way a notification's target is held.
+    const top = el.getBoundingClientRect().top;
+    let target: HTMLElement | null = null;
+    let targetTop = 0;
+    for (let parent: HTMLElement | null = contentRef.current; parent; ) {
+      let next: HTMLElement | null = null;
+      for (const child of parent.children) {
+        // Not into diagrams (SVG): an HTML box is held.
+        if (!(child instanceof HTMLElement)) continue;
+        const box = child.getBoundingClientRect();
+        if (box.bottom > top) {
+          next = child;
+          targetTop = box.top;
+          break;
+        }
+      }
+      if (next) target = next;
+      parent = next;
+    }
+    focusPin.current = target ? { anchor, target, viewTop: targetTop - top } : null;
   }, []);
+
+  // A new width is on screen: put the held place back now rather than waiting for the resize observer,
+  // so a quick second key press does not measure the view before it was corrected.
+  const firstWidth = useRef(true);
+  useLayoutEffect(() => {
+    if (firstWidth.current) {
+      firstWidth.current = false;
+      return;
+    }
+    if (pinned.current && activeRef.current === STREAM) applyPin();
+  }, [readingWidth, applyPin]);
 
   // Alt+[ / Alt+] / Alt+0 change the reading width. Registered on window, so it runs after the
   // stream's own key handler (which releases the pin) and the pin set here stays.

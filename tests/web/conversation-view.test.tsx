@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
+import type { ReadingWidth } from '../../src/web/reading-width.js';
 import { ConversationView } from '../../src/web/components/ConversationView.js';
 import type { ReviewUnit, SessionActivity, SessionSummary } from '../../src/shared/types.js';
 import { anchorOn, fakeActions, makeThread, makeUnit } from './fixtures.js';
@@ -299,6 +301,18 @@ describe('ConversationView', () => {
 describe('reading width', () => {
   const frame = () => document.querySelector<HTMLElement>('.stream-frame')!;
   const alt = (code: string, over: Record<string, unknown> = {}) => fireEvent.keyDown(window, { code, altKey: true, ...over });
+  /**
+   * Gives the innermost first element of turn `index` a box crossing the view's top edge (every other
+   * box is empty in jsdom), with its top at `top()` px below the view's top; its ancestors span the edge.
+   */
+  const crossing = (index: number, top: () => number) => {
+    let leaf = sections()[index];
+    const chain = [leaf];
+    while (leaf.firstElementChild) chain.push((leaf = leaf.firstElementChild as HTMLElement));
+    const rect = (t: number, h: number) => ({ top: t, bottom: t + h, left: 0, right: 0, width: 0, height: h, x: 0, y: t, toJSON: () => ({}) });
+    for (const el of chain) el.getBoundingClientRect = el === leaf ? () => rect(top(), 20) : () => rect(-500, 2000);
+    return leaf;
+  };
 
   it('puts the reading width on the stream frame', () => {
     const { rerender } = view(turns(3), { readingWidth: 52 });
@@ -356,5 +370,42 @@ describe('reading width', () => {
     stream().scrollTop = 300;
     act(() => observers.forEach((cb) => cb()));
     expect(stream().scrollTop).toBe(420);
+  });
+
+  it('keeps the paragraph at the top of the view in place inside a long reply', () => {
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    view(turns(10), { readingWidth: null, onReadingWidthChange: vi.fn() });
+    scrollTo(420);
+    let top = 30;
+    crossing(3, () => top);
+    alt('BracketLeft');
+    // Narrower lines make the text above it in the same reply taller: it moves 100px down.
+    top = 130;
+    act(() => observers.forEach((cb) => cb()));
+    expect(stream().scrollTop).toBe(520);
+  });
+
+  it('re-applies the place as soon as the new width is rendered, before the next key press', () => {
+    function Host() {
+      const [width, setWidth] = useState<ReadingWidth>(null);
+      return <ConversationView session={session} units={turns(10)} actionsFor={actionsFor} readingWidth={width} onReadingWidthChange={setWidth} />;
+    }
+    render(<Host />);
+    scrollTo(420);
+    let calls = 0;
+    // Measured once when the key is pressed, then after the text rewrapped 100px further down.
+    crossing(3, () => (calls++ === 0 ? 30 : 130));
+    alt('BracketLeft');
+    expect(stream().scrollTop).toBe(520);
   });
 });
