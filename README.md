@@ -309,6 +309,20 @@ returns it to the same place even when other tabs show other sessions. A new tab
 Several tabs can be open at once. They share one live connection to the server (one tab holds it and passes the
 events on; when that tab closes, another takes over), so they do not use up the browser's six connections per host.
 
+### Reading width
+
+Long lines on a wide screen are tiring to read, so the conversation's text column can be made narrower:
+
+- Drag either edge of the column (faint handles appear when the mouse is over the conversation). Both edges move
+  together. Double-click a handle to return to full width.
+- Or press **Alt+[** (narrower), **Alt+]** (wider) and **Alt+0** (full width). The shortcuts do nothing while a text
+  field has focus, and they use the physical bracket keys, so they work on other keyboard layouts too.
+
+The width is a maximum, not a share of the screen: on a screen narrower than the chosen width the text simply fills
+the screen. The wide layout and the portrait / narrow layout remember separate widths (the latter starts at full width),
+so tuning one never squeezes the other. The width is kept per browser and shared by all sessions; the local and the
+remote address keep their own. File tabs always use the full width.
+
 ## Files changed outside the edit tools
 
 The agent's own edit records (Claude `Write`/`Edit`, Codex `apply_patch`) miss files written by shell commands. So
