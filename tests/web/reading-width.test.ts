@@ -44,7 +44,7 @@ describe('reading width logic', () => {
   });
 
   it('recognises the shortcuts by physical key, not with Ctrl (AltGr) or in text fields', () => {
-    const base = { altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, target: document.body };
+    const base = { altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, target: document.body, key: 'x' };
     expect(widthShortcut({ ...base, code: 'BracketLeft' })).toBe('narrower');
     expect(widthShortcut({ ...base, code: 'BracketRight' })).toBe('wider');
     expect(widthShortcut({ ...base, code: 'Digit0' })).toBe('full');
@@ -52,6 +52,14 @@ describe('reading width logic', () => {
     expect(widthShortcut({ ...base, ctrlKey: true, code: 'BracketLeft' })).toBeNull();
     expect(widthShortcut({ ...base, altKey: false, code: 'BracketLeft' })).toBeNull();
     expect(widthShortcut({ ...base, code: 'BracketLeft', target: document.createElement('textarea') })).toBeNull();
+  });
+
+  it('falls back to the typed key when the event has no physical key code', () => {
+    const base = { altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, target: document.body, code: '' };
+    expect(widthShortcut({ ...base, key: '[' })).toBe('narrower');
+    expect(widthShortcut({ ...base, key: ']' })).toBe('wider');
+    expect(widthShortcut({ ...base, key: '0' })).toBe('full');
+    expect(widthShortcut({ ...base, key: '[', code: 'Digit8' })).toBeNull();
   });
 
   it('exposes the width as a CSS variable', () => {

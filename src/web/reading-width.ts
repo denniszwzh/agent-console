@@ -73,13 +73,15 @@ function isTextField(target: EventTarget | null): boolean {
 /**
  * Alt+[ / Alt+] / Alt+0, by physical key so other layouts work. Ctrl must be up: Windows reports AltGr as
  * Ctrl+Alt, and AltGr+8 types "[" on a German keyboard. Text fields keep their keys (Option+[ types a
- * character on macOS).
+ * character on macOS). Events without a physical key code (some remote-desktop and on-screen keyboards)
+ * fall back to the typed character.
  */
-export function widthShortcut(e: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'code' | 'target'>): WidthShortcut | null {
+export function widthShortcut(e: Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'code' | 'key' | 'target'>): WidthShortcut | null {
   if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || isTextField(e.target)) return null;
-  if (e.code === 'BracketLeft') return 'narrower';
-  if (e.code === 'BracketRight') return 'wider';
-  if (e.code === 'Digit0') return 'full';
+  const key = e.code === '' ? e.key : e.code;
+  if (key === 'BracketLeft' || key === '[') return 'narrower';
+  if (key === 'BracketRight' || key === ']') return 'wider';
+  if (key === 'Digit0' || key === '0') return 'full';
   return null;
 }
 
