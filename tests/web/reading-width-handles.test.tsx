@@ -77,4 +77,37 @@ describe('ReadingWidthHandles', () => {
     expect(onAdjustStart).toHaveBeenCalled();
     expect(onChange).toHaveBeenCalledWith(null);
   });
+
+  it('a small jitter while clicking changes nothing', () => {
+    const { right, onChange } = setup(null);
+    fireEvent.pointerDown(right, { button: 0, pointerId: 1, pointerType: 'mouse', clientX: 997 });
+    fireEvent.pointerMove(right, { pointerId: 1, clientX: 995 });
+    fireEvent.pointerUp(right, { pointerId: 1 });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('dragging to the edge keeps full width, and keeps a stored width wider than the window', () => {
+    const full = setup(null);
+    fireEvent.pointerDown(full.right, { button: 0, pointerId: 1, pointerType: 'mouse', clientX: 997 });
+    fireEvent.pointerMove(full.right, { pointerId: 1, clientX: 1100 });
+    fireEvent.pointerUp(full.right, { pointerId: 1 });
+    expect(full.onChange).not.toHaveBeenCalled();
+    cleanup();
+    const wide = setup(90);
+    fireEvent.pointerDown(wide.right, { button: 0, pointerId: 1, pointerType: 'mouse', clientX: 997 });
+    fireEvent.pointerMove(wide.right, { pointerId: 1, clientX: 1100 });
+    fireEvent.pointerUp(wide.right, { pointerId: 1 });
+    expect(wide.onChange).not.toHaveBeenCalled();
+  });
+
+  it('losing the pointer capture ends the drag', () => {
+    const { stream, right, onChange } = setup(null);
+    fireEvent.pointerDown(right, { button: 0, pointerId: 1, pointerType: 'mouse', clientX: 1000 });
+    fireEvent.pointerMove(right, { pointerId: 1, clientX: 900 });
+    fireEvent.lostPointerCapture(right, { pointerId: 1 });
+    expect(onChange).toHaveBeenCalledWith(50);
+    expect(document.body.classList.contains('reading-resizing')).toBe(false);
+    fireEvent.pointerMove(right, { pointerId: 1, clientX: 800 });
+    expect(stream.style.getPropertyValue('--reading-max')).toBe('');
+  });
 });

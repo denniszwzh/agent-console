@@ -3,6 +3,8 @@ import { rootRemPx, widthFromDrag, type ReadingWidth } from '../reading-width.js
 
 /** Width of each handle, in pixels. */
 export const HANDLE_PX = 6;
+/** A press must move this far before it counts as a drag, so a jittery click changes nothing. */
+const DRAG_THRESHOLD_PX = 3;
 
 interface Props {
   /** The scrolling conversation; the handles sit over its edges, outside it. */
@@ -24,6 +26,8 @@ export function ReadingWidthHandles({ streamRef, width, onAdjustStart, onChange 
   const [drag, setDrag] = useState<number | null>(null);
   const dragRef = useRef<number | null>(null);
   const pointer = useRef<number | null>(null);
+  const startX = useRef(0);
+  const moved = useRef(false);
   const frame = useRef<number | null>(null);
   const pending = useRef<number | null>(null);
 
@@ -61,6 +65,8 @@ export function ReadingWidthHandles({ streamRef, width, onAdjustStart, onChange 
     e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
     pointer.current = e.pointerId;
+    startX.current = e.clientX;
+    moved.current = false;
     document.body.classList.add('reading-resizing');
     onAdjustStart();
   };
@@ -68,6 +74,8 @@ export function ReadingWidthHandles({ streamRef, width, onAdjustStart, onChange 
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const el = streamRef.current;
     if (e.pointerId !== pointer.current || !el) return;
+    if (!moved.current && Math.abs(e.clientX - startX.current) < DRAG_THRESHOLD_PX) return;
+    moved.current = true;
     const box = el.getBoundingClientRect();
     const centre = box.left + el.clientWidth / 2;
     pending.current = widthFromDrag(e.clientX - centre, rootRemPx(), el.clientWidth / rootRemPx());
@@ -85,9 +93,14 @@ export function ReadingWidthHandles({ streamRef, width, onAdjustStart, onChange 
     document.body.classList.remove('reading-resizing');
     const w = dragRef.current;
     dragRef.current = null;
-    // The new width reaches the frame in the same render that clears the stream's own value.
-    if (w !== null) onChange(w);
-    streamRef.current?.style.removeProperty('--reading-max');
+    const el = streamRef.current;
+    const availableRem = el ? el.clientWidth / rootRemPx() : 0;
+    // Dragged to the edge: what shows is full width. Like Alt+], keep full width or a stored width
+    // wider than this window (tuned on a bigger screen) instead of overwriting it with this window's.
+    const keep = w !== null && w >= availableRem && (width === null || width >= availableRem);
+    if (w !== null && !keep) onChange(w);
+    // Cleared before React commits the new width to the frame; nothing paints in between.
+    el?.style.removeProperty('--reading-max');
     setDrag(null);
   };
 
@@ -113,6 +126,7 @@ export function ReadingWidthHandles({ streamRef, width, onAdjustStart, onChange 
           onPointerMove={onPointerMove}
           onPointerUp={onPointerEnd}
           onPointerCancel={onPointerEnd}
+          onLostPointerCapture={onPointerEnd}
           onDoubleClick={onDoubleClick}
         />
       ))}
