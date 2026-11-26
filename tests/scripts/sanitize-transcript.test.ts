@@ -106,6 +106,11 @@ describe('sanitize-transcript removes private content', () => {
     expect(out).toEqual({ ...rec, message: { ...rec.message, content: [{ ...rec.message.content[0], input: { command: 'xxx /xxx/xxxxx' } }] } });
   });
 
+  it('keeps ids under keys that end in an upper-case ID (hook attachments)', () => {
+    const rec = { attachment: { type: 'hook_success', toolUseID: '11111111-2222-4333-8444-555555555555', hookEvent: 'SessionStart' } };
+    expect(one(rec).attachment.toolUseID).toBe(rec.attachment.toolUseID);
+  });
+
   it('replaces account, organization and bridge ids consistently, keeping their shape', () => {
     const s = createSanitizer() as Sanitizer;
     const account = '1a2b3c4d-1111-4222-8333-444455556666';

@@ -46,7 +46,7 @@ const ENUM_KEYS = new Set([
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 const ENUM_VALUE = /^[A-Za-z0-9_.:@+-]{1,80}$/;
 /** Keys that hold identifiers; values that look like one are kept. */
-const ID_KEY = /(^id$|Id$|_id$|^uuid$|Uuid$|^parentUuid$|^session$|^thread$)/;
+const ID_KEY = /(^id$|Id$|ID$|_id$|^uuid$|Uuid$|^parentUuid$|^session$|^thread$)/;
 const ID_VALUE = /^[A-Za-z0-9_-]{1,100}$/;
 /** Keys whose id ties the transcript to an account, an organization or a remote bridge: replaced. */
 const ACCOUNT_KEY = /^(?:owner|account|organization|org)\w*(?:Uuid|Id|_uuid|_id)$|^(?:accountUuid|organizationUuid|bridgeSessionId)$/i;
