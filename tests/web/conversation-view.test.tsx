@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
+import type { ReadingWidth } from '../../src/web/reading-width.js';
 import { ConversationView } from '../../src/web/components/ConversationView.js';
 import type { ReviewUnit, SessionActivity, SessionSummary } from '../../src/shared/types.js';
 import { anchorOn, fakeActions, makeThread, makeUnit } from './fixtures.js';
@@ -20,6 +22,8 @@ beforeAll(() => {
     return this.querySelectorAll('section.turn').length * 100 + 50 + extra;
   });
   define('clientHeight', () => 300);
+  // 1280px wide = 80rem at jsdom's 16px root font size.
+  define('clientWidth', () => 1280);
   define('offsetHeight', () => 100);
   define('offsetTop', function () {
     if (this.tagName !== 'SECTION') return 0;
@@ -291,5 +295,168 @@ describe('ConversationView', () => {
     const head = document.querySelector('.conversation-head')!;
     expect(head.textContent).toContain('work');
     expect(head.textContent).toContain('feat-x');
+  });
+});
+
+describe('reading width', () => {
+  const frame = () => document.querySelector<HTMLElement>('.stream-frame')!;
+  const alt = (code: string, over: Record<string, unknown> = {}) => fireEvent.keyDown(window, { code, altKey: true, ...over });
+  /**
+   * Gives the innermost first element of turn `index` a 20px box with its top at `top()` px from the
+   * view's top (every other box is empty in jsdom); its ancestors span the edge.
+   */
+  const crossing = (index: number, top: () => number) => {
+    let leaf = sections()[index];
+    const chain = [leaf];
+    while (leaf.firstElementChild) chain.push((leaf = leaf.firstElementChild as HTMLElement));
+    const rect = (t: number, h: number) => ({ top: t, bottom: t + h, left: 0, right: 0, width: 0, height: h, x: 0, y: t, toJSON: () => ({}) });
+    for (const el of chain) el.getBoundingClientRect = el === leaf ? () => rect(top(), 20) : () => rect(-500, 2000);
+    return leaf;
+  };
+
+  it('puts the reading width on the stream frame', () => {
+    const { rerender } = view(turns(3), { readingWidth: 52 });
+    expect(frame().style.getPropertyValue('--reading-max')).toBe('52rem');
+    rerender(<ConversationView session={session} units={turns(3)} actionsFor={actionsFor} readingWidth={null} />);
+    expect(frame().style.getPropertyValue('--reading-max')).toBe('');
+  });
+
+  it('Alt+[ narrows from the visible width', () => {
+    const onReadingWidthChange = vi.fn();
+    view(turns(3), { readingWidth: null, onReadingWidthChange });
+    alt('BracketLeft');
+    expect(onReadingWidthChange).toHaveBeenCalledWith(76);
+  });
+
+  it('Alt+] widens and Alt+0 returns to full width', () => {
+    const onReadingWidthChange = vi.fn();
+    view(turns(3), { readingWidth: 60, onReadingWidthChange });
+    alt('BracketRight');
+    expect(onReadingWidthChange).toHaveBeenLastCalledWith(64);
+    alt('Digit0');
+    expect(onReadingWidthChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it('ignores the shortcut with AltGr, in a text field, or on a file tab', () => {
+    const onReadingWidthChange = vi.fn();
+    const units = turns(3);
+    units[2].files = [{ id: 'f', kind: 'file', path: 'a.ts', content: 'x', blocks: [] }];
+    view(units, { readingWidth: 60, onReadingWidthChange });
+    alt('BracketLeft', { ctrlKey: true });
+    const box = document.body.appendChild(document.createElement('textarea'));
+    fireEvent.keyDown(box, { code: 'BracketLeft', altKey: true });
+    box.remove();
+    fireEvent.click(screen.getByRole('tab', { name: 'a.ts' }));
+    alt('BracketLeft');
+    expect(onReadingWidthChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps the text at the top of the view in place while the width changes', () => {
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    view(turns(10), { readingWidth: null, onReadingWidthChange: vi.fn() });
+    scrollTo(420);
+    alt('BracketLeft');
+    // The text reflows: the view would be left at another place.
+    stream().scrollTop = 300;
+    act(() => observers.forEach((cb) => cb()));
+    expect(stream().scrollTop).toBe(420);
+  });
+
+  it('keeps the paragraph at the top of the view in place inside a long reply', () => {
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    view(turns(10), { readingWidth: null, onReadingWidthChange: vi.fn() });
+    scrollTo(420);
+    let top = -10;
+    crossing(3, () => top);
+    alt('BracketLeft');
+    // Narrower lines make the text above it in the same reply taller: it moves 100px down.
+    top = 90;
+    act(() => observers.forEach((cb) => cb()));
+    expect(stream().scrollTop).toBe(520);
+  });
+
+  it('holds the next block when the top edge falls in the gap above it', () => {
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    view(turns(10), { readingWidth: null, onReadingWidthChange: vi.fn() });
+    scrollTo(420);
+    const turn = sections()[3];
+    turn.getBoundingClientRect = () => ({ top: -500, bottom: 1500, left: 0, right: 0, width: 0, height: 2000, x: 0, y: -500, toJSON: () => ({}) });
+    const block = turn.firstElementChild as HTMLElement;
+    expect(getComputedStyle(block).display).toBe('block');
+    let top = 30;
+    block.getBoundingClientRect = () => ({ top, bottom: top + 20, left: 0, right: 0, width: 0, height: 20, x: 0, y: top, toJSON: () => ({}) });
+    alt('BracketLeft');
+    top = 130;
+    act(() => observers.forEach((cb) => cb()));
+    expect(stream().scrollTop).toBe(520);
+  });
+
+  it('holds the paragraph crossing the top edge, not inline code further down in it', () => {
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    view(turns(10), { readingWidth: null, onReadingWidthChange: vi.fn() });
+    scrollTo(420);
+    let shift = 0;
+    const paragraph = crossing(3, () => -10 + shift);
+    const code = paragraph.appendChild(document.createElement('code'));
+    code.getBoundingClientRect = () => ({ top: 60 + 3 * shift, bottom: 80 + 3 * shift, left: 0, right: 0, width: 0, height: 20, x: 0, y: 60 + 3 * shift, toJSON: () => ({}) });
+    alt('BracketLeft');
+    // The paragraph moves 100px down; the code three lines further into it moves 300px as its lines rewrap.
+    shift = 100;
+    act(() => observers.forEach((cb) => cb()));
+    expect(stream().scrollTop).toBe(520);
+  });
+
+  it('re-applies the place as soon as the new width is rendered, before the next key press', () => {
+    function Host() {
+      const [width, setWidth] = useState<ReadingWidth>(null);
+      return <ConversationView session={session} units={turns(10)} actionsFor={actionsFor} readingWidth={width} onReadingWidthChange={setWidth} />;
+    }
+    render(<Host />);
+    scrollTo(420);
+    let calls = 0;
+    // Measured once when the key is pressed, then after the text rewrapped 100px further down.
+    crossing(3, () => (calls++ === 0 ? -10 : 90));
+    alt('BracketLeft');
+    expect(stream().scrollTop).toBe(520);
   });
 });

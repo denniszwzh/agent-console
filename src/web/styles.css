@@ -1673,7 +1673,69 @@ textarea {
 .stream[hidden] {
   display: none;
 }
+/* Holds the stream and the reading-width handles; --reading-max is the column's maximum width. */
+.stream-frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.stream-frame[hidden] {
+  display: none;
+}
+/* Reading-width handles: faint while the pointer is over the conversation, hidden on touch screens. */
+.reading-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 6px;
+  border-radius: 3px;
+  cursor: col-resize;
+  touch-action: none;
+  opacity: 0;
+  background: var(--border);
+  transition: opacity 0.15s;
+}
+.stream-frame:hover .reading-handle {
+  opacity: 0.6;
+}
+.reading-handle:hover,
+.reading-handle.active {
+  opacity: 1;
+  background: var(--muted);
+}
+.reading-label {
+  position: absolute;
+  top: 0.75rem;
+  z-index: 6;
+  transform: translateX(calc(-100% - 0.4rem));
+  padding: 0.15rem 0.5rem;
+  border-radius: 6px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  pointer-events: none;
+}
+body.reading-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+@media (hover: none) {
+  .reading-handle {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reading-handle {
+    transition: none;
+  }
+}
 .stream-content {
+  max-width: var(--reading-max, none);
+  margin-inline: auto;
   padding-bottom: 2rem;
 }
 .stream-start {
@@ -1696,7 +1758,8 @@ textarea {
   position: sticky;
   bottom: 1rem;
   display: block;
-  margin: 0 1.25rem 0 auto;
+  /* Aligned with the reading column's right edge. */
+  margin: 0 max(1.25rem, calc((100% - var(--reading-max, 100%)) / 2 + 1.25rem)) 0 auto;
   box-shadow: var(--shadow);
 }
 .tab-wrap {

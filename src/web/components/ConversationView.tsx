@@ -2,9 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import type { ReviewUnit, SessionActivity, SessionSummary } from '../../shared/types.js';
 import { basename } from '../labels.js';
 import { threadChain, type FocusTarget } from '../notifications.js';
+import { narrower, readingWidthStyle, rootRemPx, wider, widthShortcut, type ReadingWidth } from '../reading-width.js';
 import { anchorTop, nearBottom, topAnchor, type StreamAnchor } from '../scroll.js';
 import { RevealContext, UnitProvider, rootSourceId, type Reveal, type UnitActions } from '../unit-context.js';
 import { ConclusionBar } from './ConclusionBar.js';
+import { ReadingWidthHandles } from './ReadingWidthHandles.js';
 import { RespondingBanner } from './Responding.js';
 import { AddFileButton, SourceTabs, type TabSpec } from './SourceTabs.js';
 import { SourceView } from './SourceView.js';
@@ -43,6 +45,9 @@ interface Props {
   onAnchorChange?(anchor: StreamAnchor | null): void;
   /** A clicked notification: show this turn, or this thread unfolded. */
   focus?: FocusTarget | null;
+  /** The reading column's maximum width for the current layout (rem; null = full width). */
+  readingWidth?: ReadingWidth;
+  onReadingWidthChange?(width: ReadingWidth): void;
 }
 
 const tabId = (unitId: string, sourceId: string) => `${unitId}:${sourceId}`;
@@ -57,7 +62,7 @@ function openCount(unit: ReviewUnit, sourceId: string): number {
  * first, opened at the bottom. Only the newest turn can be reviewed while it is open; its files are
  * tabs, and files of earlier turns open as temporary tabs.
  */
-export function ConversationView({ session, units, actionsFor, navToggle, responding, initialAnchor, onAnchorChange, focus }: Props) {
+export function ConversationView({ session, units, actionsFor, navToggle, responding, initialAnchor, onAnchorChange, focus, readingWidth = null, onReadingWidthChange }: Props) {
   const latest = units[units.length - 1] as ReviewUnit | undefined;
   const [active, setActive] = useState(STREAM);
   const [temps, setTemps] = useState<TempTab[]>([]);
@@ -235,6 +240,85 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
     pinned.current = null;
   };
 
+  /** Before the reading width changes: keep the text at the top of the view there while it reflows. */
+  const holdPlace = useCallback(() => {
+    const el = streamRef.current;
+    if (!el) return;
+    if (nearBottom(el)) {
+      pinned.current = 'bottom';
+      return;
+    }
+    const anchor = topAnchor(el);
+    if (!anchor) return;
+    pinned.current = anchor;
+    // A turn and an offset drift inside a long reply as its lines rewrap: hold the innermost element
+    // crossing the view's top edge in place instead, the way a notification's target is held.
+    const top = el.getBoundingClientRect().top;
+    let target: HTMLElement | null = null;
+    let targetTop = 0;
+    for (let parent: HTMLElement | null = contentRef.current; parent; ) {
+      let next: HTMLElement | null = null;
+      for (const child of parent.children) {
+        // Not into diagrams (SVG): an HTML box is held.
+        if (!(child instanceof HTMLElement)) continue;
+        const box = child.getBoundingClientRect();
+        if (box.bottom <= top) continue;
+        if (box.top <= top) {
+          // Crosses the edge: look inside it.
+          next = child;
+        } else if (!getComputedStyle(child).display.startsWith('inline')) {
+          // The edge falls in the gap above this block: hold the block. (Inline code or a link further
+          // down a paragraph is not held; the paragraph crossing the edge already is.)
+          target = child;
+          targetTop = box.top;
+        }
+        if (next) {
+          target = next;
+          targetTop = box.top;
+        }
+        break;
+      }
+      parent = next;
+    }
+    focusPin.current = target ? { anchor, target, viewTop: targetTop - top } : null;
+  }, []);
+
+  // A new width is on screen: put the held place back now rather than waiting for the resize observer,
+  // so a quick second key press does not measure the view before it was corrected.
+  const firstWidth = useRef(true);
+  useLayoutEffect(() => {
+    if (firstWidth.current) {
+      firstWidth.current = false;
+      return;
+    }
+    if (pinned.current && activeRef.current === STREAM) applyPin();
+  }, [readingWidth, applyPin]);
+
+  // Alt+[ / Alt+] / Alt+0 change the reading width. Registered on window, so it runs after the
+  // stream's own key handler (which releases the pin) and the pin set here stays.
+  const widthRef = useRef(readingWidth);
+  widthRef.current = readingWidth;
+  const widthChangeRef = useRef(onReadingWidthChange);
+  widthChangeRef.current = onReadingWidthChange;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const change = widthChangeRef.current;
+      const el = streamRef.current;
+      if (!change || !el || e.defaultPrevented || activeRef.current !== STREAM) return;
+      const shortcut = widthShortcut(e);
+      if (!shortcut) return;
+      e.preventDefault();
+      const available = el.clientWidth / rootRemPx();
+      const current = widthRef.current;
+      const next = shortcut === 'full' ? null : shortcut === 'narrower' ? narrower(current, available) : wider(current, available);
+      if (next === current) return;
+      holdPlace();
+      change(next);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [holdPlace]);
+
   const toBottom = () => {
     pinned.current = 'bottom';
     setNewTurn(false);
@@ -386,49 +470,52 @@ export function ConversationView({ session, units, actionsFor, navToggle, respon
             ) : null
           }
         />
-        <div
-          className="stream"
-          ref={streamRef}
-          hidden={!showingStream}
-          onScroll={onScroll}
-          onWheel={release}
-          onTouchStart={release}
-          onKeyDown={release}
-          onMouseDown={release}
-        >
-          <div className="stream-content" ref={contentRef}>
-            {firstIndex > 0 ? (
-              <button type="button" className="btn ghost stream-start" onClick={loadMore}>
-                Load earlier turns
-              </button>
-            ) : (
-              units.length > 0 && <div className="stream-start">Conversation started {new Date(units[0].createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', hour12: false })}</div>
-            )}
-            {shown.map((u, i) => (
-              <TurnView
-                key={u.id}
-                unit={u}
-                actions={actionsFor(u)}
-                latest={firstIndex + i === units.length - 1}
-                turnNumber={firstIndex + i + 1}
-                onOpenFile={onOpenFile}
-              />
-            ))}
-            {units.length === 0 && responding?.prompt && (
-              <div className="turn-prompts">
-                <div className="turn-prompt">
-                  <span className="you-label turn-prompt-who">You</span>
-                  <div className="turn-prompt-text">{responding.prompt}</div>
+        <div className="stream-frame" hidden={!showingStream} style={readingWidthStyle(readingWidth)}>
+          <div
+            className="stream"
+            ref={streamRef}
+            hidden={!showingStream}
+            onScroll={onScroll}
+            onWheel={release}
+            onTouchStart={release}
+            onKeyDown={release}
+            onMouseDown={release}
+          >
+            <div className="stream-content" ref={contentRef}>
+              {firstIndex > 0 ? (
+                <button type="button" className="btn ghost stream-start" onClick={loadMore}>
+                  Load earlier turns
+                </button>
+              ) : (
+                units.length > 0 && <div className="stream-start">Conversation started {new Date(units[0].createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', hour12: false })}</div>
+              )}
+              {shown.map((u, i) => (
+                <TurnView
+                  key={u.id}
+                  unit={u}
+                  actions={actionsFor(u)}
+                  latest={firstIndex + i === units.length - 1}
+                  turnNumber={firstIndex + i + 1}
+                  onOpenFile={onOpenFile}
+                />
+              ))}
+              {units.length === 0 && responding?.prompt && (
+                <div className="turn-prompts">
+                  <div className="turn-prompt">
+                    <span className="you-label turn-prompt-who">You</span>
+                    <div className="turn-prompt-text">{responding.prompt}</div>
+                  </div>
                 </div>
-              </div>
+              )}
+              {responding && <RespondingBanner activity={responding} unitOpen={latest?.status === 'open'} />}
+            </div>
+            {newTurn && (
+              <button type="button" className="btn primary new-turn" onClick={toBottom}>
+                ↓ New reply
+              </button>
             )}
-            {responding && <RespondingBanner activity={responding} unitOpen={latest?.status === 'open'} />}
           </div>
-          {newTurn && (
-            <button type="button" className="btn primary new-turn" onClick={toBottom}>
-              ↓ New reply
-            </button>
-          )}
+          {onReadingWidthChange && <ReadingWidthHandles streamRef={streamRef} width={readingWidth} onAdjustStart={holdPlace} onChange={onReadingWidthChange} onReaderScroll={release} />}
         </div>
         {file && fileSource && (
           <div className="file-pane">

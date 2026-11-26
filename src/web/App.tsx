@@ -9,6 +9,7 @@ import { SessionSwitcher, useHoldSwitcher } from './components/SessionSwitcher.j
 import { Sidebar } from './components/Sidebar.js';
 import { sessionTitle } from './labels.js';
 import { useSidebarLayout } from './layout.js';
+import { useReadingWidth } from './reading-width.js';
 import { detectCompletions, stackCompletions, type Completion, type FocusTarget } from './notifications.js';
 import type { UnitActions } from './unit-context.js';
 import { loadViewState, saveViewState } from './view-state.js';
@@ -49,6 +50,7 @@ export function App() {
   const [restored] = useState(loadViewState);
   const [initialAnchor, setInitialAnchor] = useState(restored.anchor);
   const layout = useSidebarLayout();
+  const reading = useReadingWidth(layout.compact);
   const switcher = useHoldSwitcher();
   // Request counters so a slow, older response never overwrites a newer one.
   const seq = useRef(new Map<string, number>());
@@ -377,6 +379,8 @@ export function App() {
             initialAnchor={selected === restored.session ? initialAnchor : null}
             onAnchorChange={(anchor) => saveViewState({ session: selected, anchor })}
             focus={focus?.sessionId === selected ? focus : null}
+            readingWidth={reading.width}
+            onReadingWidthChange={reading.setWidth}
           />
         ) : (
           <>
