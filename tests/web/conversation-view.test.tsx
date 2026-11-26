@@ -20,6 +20,8 @@ beforeAll(() => {
     return this.querySelectorAll('section.turn').length * 100 + 50 + extra;
   });
   define('clientHeight', () => 300);
+  // 1280px wide = 80rem at jsdom's 16px root font size.
+  define('clientWidth', () => 1280);
   define('offsetHeight', () => 100);
   define('offsetTop', function () {
     if (this.tagName !== 'SECTION') return 0;
@@ -291,5 +293,68 @@ describe('ConversationView', () => {
     const head = document.querySelector('.conversation-head')!;
     expect(head.textContent).toContain('work');
     expect(head.textContent).toContain('feat-x');
+  });
+});
+
+describe('reading width', () => {
+  const frame = () => document.querySelector<HTMLElement>('.stream-frame')!;
+  const alt = (code: string, over: Record<string, unknown> = {}) => fireEvent.keyDown(window, { code, altKey: true, ...over });
+
+  it('puts the reading width on the stream frame', () => {
+    const { rerender } = view(turns(3), { readingWidth: 52 });
+    expect(frame().style.getPropertyValue('--reading-max')).toBe('52rem');
+    rerender(<ConversationView session={session} units={turns(3)} actionsFor={actionsFor} readingWidth={null} />);
+    expect(frame().style.getPropertyValue('--reading-max')).toBe('');
+  });
+
+  it('Alt+[ narrows from the visible width', () => {
+    const onReadingWidthChange = vi.fn();
+    view(turns(3), { readingWidth: null, onReadingWidthChange });
+    alt('BracketLeft');
+    expect(onReadingWidthChange).toHaveBeenCalledWith(76);
+  });
+
+  it('Alt+] widens and Alt+0 returns to full width', () => {
+    const onReadingWidthChange = vi.fn();
+    view(turns(3), { readingWidth: 60, onReadingWidthChange });
+    alt('BracketRight');
+    expect(onReadingWidthChange).toHaveBeenLastCalledWith(64);
+    alt('Digit0');
+    expect(onReadingWidthChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it('ignores the shortcut with AltGr, in a text field, or on a file tab', () => {
+    const onReadingWidthChange = vi.fn();
+    const units = turns(3);
+    units[2].files = [{ id: 'f', kind: 'file', path: 'a.ts', content: 'x', blocks: [] }];
+    view(units, { readingWidth: 60, onReadingWidthChange });
+    alt('BracketLeft', { ctrlKey: true });
+    const box = document.body.appendChild(document.createElement('textarea'));
+    fireEvent.keyDown(box, { code: 'BracketLeft', altKey: true });
+    box.remove();
+    fireEvent.click(screen.getByRole('tab', { name: 'a.ts' }));
+    alt('BracketLeft');
+    expect(onReadingWidthChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps the text at the top of the view in place while the width changes', () => {
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    view(turns(10), { readingWidth: null, onReadingWidthChange: vi.fn() });
+    scrollTo(420);
+    alt('BracketLeft');
+    // The text reflows: the view would be left at another place.
+    stream().scrollTop = 300;
+    act(() => observers.forEach((cb) => cb()));
+    expect(stream().scrollTop).toBe(420);
   });
 });
